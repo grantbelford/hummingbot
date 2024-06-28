@@ -190,28 +190,24 @@ class BiconomyExchange(ExchangePyBase):
                            **kwargs) -> Tuple[str, float]:
         order_result = None
         amount_str = f"{amount:f}"
-        type_str = BiconomyExchange.biconomy_order_type(order_type)
+        # type_str = BiconomyExchange.biconomy_order_type(order_type)
         side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-        api_params = {"market": symbol,
-                      "side": side_str,
-                      "amount": amount_str,
-                      "type": type_str,
-                      # "newClientOrderId": order_id
-                      }
-        if order_type is OrderType.LIMIT:
-            url = CONSTANTS.ORDER_PATH_URL.format("limit")
-        else:
-            url = CONSTANTS.ORDER_PATH_URL.format("market")
+        api_params = {
+            "amount": amount_str,
+            "market": symbol
+        }
         if order_type is OrderType.LIMIT or order_type is OrderType.LIMIT_MAKER:
             price_str = f"{price:f}"
             api_params["price"] = price_str
+        api_params["side"] = side_str
 
+        trade_types = "limit" if order_type is OrderType.LIMIT else "market"
         try:
             order_result = await self._api_post(
-                path_url=url,
+                path_url=CONSTANTS.TRADE_PATH_URL.format(f"{trade_types}"),
                 data=api_params,
-                limit_id=CONSTANTS.ORDER_PATH_URL,
+                limit_id=CONSTANTS.TRADE_PATH_URL,
                 is_auth_required=True)
             o_id = str(order_result["id"])
             transact_time = order_result["ctime"] * 1e-3

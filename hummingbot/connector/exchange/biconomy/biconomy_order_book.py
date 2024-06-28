@@ -48,8 +48,8 @@ class BiconomyOrderBook(OrderBook):
             "trading_pair": msg["trading_pair"],
             "first_update_id": timestamp,
             "update_id": timestamp,
-            "bids": [[msg[0], msg[1]] for msg in msg["params"][1]["bids"]],
-            "asks": [[msg[0], msg[1]] for msg in msg["params"][1]["asks"]]
+            "bids": [[msg[0], msg[1]] for msg in msg["params"][1].get("bids", [])],
+            "asks": [[msg[0], msg[1]] for msg in msg["params"][1].get("asks", [])]
         }, timestamp=timestamp)
 
     @classmethod

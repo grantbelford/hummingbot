@@ -23,6 +23,7 @@ SNAPSHOT_PATH_URL = "/depth"
 # Private API endpoints or BiconomyClient function
 ACCOUNTS_PATH_URL = "/private/user"
 MY_TRADES_PATH_URL = "/private/order/deals"
+TRADE_PATH_URL = "/private/trade/{}"
 ORDER_PATH_URL = "/private/order/{}"
 ORDER_STATUS = "/private/order/{}/detail"
 CANCEL_ORDER_PATH_URL = "/private/trade/cancel"
@@ -36,18 +37,12 @@ WS_HEARTBEAT_TIME_INTERVAL = 30
 
 # Biconomy params
 
-SIDE_BUY = "BUY"
-SIDE_SELL = "SELL"
+SIDE_BUY = "1"
+SIDE_SELL = "2"
 
 TIME_IN_FORCE_GTC = "GTC"  # Good till cancelled
 TIME_IN_FORCE_IOC = "IOC"  # Immediate or cancel
 TIME_IN_FORCE_FOK = "FOK"  # Fill or kill
-
-# Rate Limit Type
-REQUEST_WEIGHT = "REQUEST_WEIGHT"
-ORDERS = "ORDERS"
-ORDERS_24HR = "ORDERS_24HR"
-RAW_REQUESTS = "RAW_REQUESTS"
 
 # Rate Limit time intervals
 ONE_MINUTE = 60
@@ -78,6 +73,7 @@ RATE_LIMITS = [
     RateLimit(limit_id=ORDER_STATUS, limit=20, time_interval=ONE_SECOND),
     RateLimit(limit_id=CANCEL_ORDER_PATH_URL, limit=20, time_interval=ONE_SECOND),
     RateLimit(limit_id=ORDER_PATH_URL, limit=20, time_interval=ONE_SECOND),
+    RateLimit(limit_id=TRADE_PATH_URL, limit=20, time_interval=ONE_SECOND),
 ]
 
 ORDER_NOT_EXIST_ERROR_CODE = -2013
