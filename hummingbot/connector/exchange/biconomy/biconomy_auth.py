@@ -5,6 +5,8 @@ from collections import OrderedDict
 from typing import Any, Dict
 from urllib.parse import urlencode
 
+from urllib3 import encode_multipart_formdata
+
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest, WSRequest
@@ -41,13 +43,15 @@ class BiconomyAuth(AuthBase):
         the required parameter in the request header.
         :param request: the request to be configured for authenticated interaction
         """
+        headers = {}
         if request.method == RESTMethod.POST and request.data is not None:
-            request.data = self.add_auth_to_params(
+            body, content_type = self.add_auth_params(
                 params=json.loads(request.data))
+            request.data = body
+            request.headers["Content-Type"] = content_type
         else:
             request.params = self.add_auth_to_params(params=request.params)
 
-        headers = {"Content-Type": "multipart/form-data"}
         if request.headers is not None:
             headers.update(request.headers)
         headers.update(self.header_for_authentication())
@@ -75,9 +79,22 @@ class BiconomyAuth(AuthBase):
             "sign": str.upper(self.get_hmac_sha256(params_string))
         }
 
-        # sorted_params = {key: request_params[key] for key in sorted(request_params)}
-
         return params_sign
+
+    def add_auth_params(self, params: Dict[str, Any]):
+        request_params = OrderedDict(params or {})
+        request_params["api_key"] = self.api_key
+
+        sign_string = self.build_parameters(request_params) + "&secret_key=" + self.secret_key
+        params_sign = str.upper(self.get_hmac_sha256(sign_string))
+        request_params["sign"] = params_sign
+
+        # Convert all values to strings
+        param = {k: str(v) for k, v in request_params.items()}
+
+        # Encode request parameters for multipart form data
+        body, content_type = encode_multipart_formdata(param)
+        return body, content_type
 
     def build_parameters(self, params: dict):
         keys = list(params.keys())
@@ -85,11 +102,10 @@ class BiconomyAuth(AuthBase):
         return '&'.join([f"{key}={params[key]}" for key in keys])
 
     def header_for_authentication(self) -> Dict[str, str]:
-        # encode_dict = encode_multipart_formdata(param_dict)
-        # data = encode_dict[0]
-        # headers['Content-Type'] = encode_dict[1]
-        # {"Content-Type": "multipart/form-data"}
-        return {"X-SITE-ID": "127"}
+        headers = {
+            "X-SITE-ID": "127",
+        }
+        return headers
 
     def _generate_signature(self, params: Dict[str, Any]) -> str:
 

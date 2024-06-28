@@ -71,28 +71,30 @@ class BiconomyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         try:
             trade_params = []
-            depth_params = [50, "0.01"]
+            depth_params = [10, "0.01"]
             for trading_pair in self._trading_pairs:
                 symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-                trade_params.insert(f"{symbol.upper()}")
-                depth_params.append(f"{symbol.upper()}")
-            payload = {
+                sym = symbol.upper()
+                depth_params.insert(0, sym)
+                trade_params.append(sym)
+            depth_payload = {
                 "method": "depth.subscribe",
-                "params": trade_params,
-                "id": 1
-            }
-            subscribe_trade_request: WSJSONRequest = WSJSONRequest(
-                payload=payload)
-
-            payload = {
-                "method": "deals.subscribe",
                 "params": depth_params,
+                "id": 2066
             }
             subscribe_orderbook_request: WSJSONRequest = WSJSONRequest(
-                payload=payload)
+                payload=depth_payload)
 
-            await ws.send(subscribe_trade_request)
+            trade_payload = {
+                "method": "deals.subscribe",
+                "params": trade_params,
+                "id": 2070
+            }
+            subscribe_trade_request: WSJSONRequest = WSJSONRequest(
+                payload=trade_payload)
+
             await ws.send(subscribe_orderbook_request)
+            await ws.send(subscribe_trade_request)
 
             self.logger().info("Subscribed to public order book and trade channels...")
         except asyncio.CancelledError:
@@ -106,7 +108,7 @@ class BiconomyAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws: WSAssistant = await self._api_factory.get_ws_assistant()
-        await ws.connect(ws_url=CONSTANTS.WSS_URL.format(self._domain),
+        await ws.connect(ws_url=CONSTANTS.WSS_URL,
                          ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
         return ws
 
@@ -121,14 +123,14 @@ class BiconomyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         return snapshot_msg
 
     async def _parse_trade_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        if "result" in raw_message:
-            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["params"][2])
+        if "error" not in raw_message:
+            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["params"][0])
             trade_message = BiconomyOrderBook.trade_message_from_exchange(
                 raw_message, {"trading_pair": trading_pair})
             message_queue.put_nowait(trade_message)
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        if "result" in raw_message:
+        if "error" not in raw_message:
             trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["params"][2])
             order_book_message: OrderBookMessage = BiconomyOrderBook.diff_message_from_exchange(
                 raw_message, time.time(), {"trading_pair": trading_pair})
@@ -136,7 +138,7 @@ class BiconomyAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     def _channel_originating_message(self, event_message: Dict[str, Any]) -> str:
         channel = ""
-        if "result" in event_message:
+        if "error" not in event_message:
             event_type = event_message.get("method")
             channel = (self._diff_messages_queue_key if event_type == CONSTANTS.DIFF_EVENT_TYPE
                        else self._trade_messages_queue_key)

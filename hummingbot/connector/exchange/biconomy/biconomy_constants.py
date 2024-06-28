@@ -12,7 +12,7 @@ WSS_URL = "wss://www.biconomy.com/ws"
 
 PUBLIC_API_VERSION = "v1"
 PRIVATE_API_VERSION = "v2"
-
+PING_TIMEOUT = 3
 # Public API endpoints or BiconomyClient function
 TICKER_PRICE_CHANGE_PATH_URL = "/tickers"
 TICKER_BOOK_PATH_URL = "/tickers"
@@ -22,14 +22,15 @@ SNAPSHOT_PATH_URL = "/depth"
 
 # Private API endpoints or BiconomyClient function
 ACCOUNTS_PATH_URL = "/private/user"
-MY_TRADES_PATH_URL = "private/order/deals"
-ORDER_PATH_URL = "private/order/{}"
-ORDER_STATUS = "private/order/{}/detail"
+MY_TRADES_PATH_URL = "/private/order/deals"
+ORDER_PATH_URL = "/private/order/{}"
+ORDER_STATUS = "/private/order/{}/detail"
 CANCEL_ORDER_PATH_URL = "/private/trade/cancel"
 BICONOMY_USER_STREAM_PATH_URL = "/userDataStream"
 
 USER_TRADES_ENDPOINT_NAME = "deals.update"
-
+USER_ORDERS_ENDPOINT_NAME = "order.subscribe"
+SERVER_SIGN = "server.sign"
 
 WS_HEARTBEAT_TIME_INTERVAL = 30
 

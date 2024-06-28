@@ -48,8 +48,8 @@ class BiconomyOrderBook(OrderBook):
             "trading_pair": msg["trading_pair"],
             "first_update_id": timestamp,
             "update_id": timestamp,
-            "bids": msg["bids"],
-            "asks": msg["asks"]
+            "bids": [[msg[0], msg[1]] for msg in msg["params"][1]["bids"]],
+            "asks": [[msg[0], msg[1]] for msg in msg["params"][1]["asks"]]
         }, timestamp=timestamp)
 
     @classmethod
@@ -62,12 +62,12 @@ class BiconomyOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["time"]
+        ts = msg["params"][1][0]["time"]
         return OrderBookMessage(OrderBookMessageType.TRADE, {
             "trading_pair": msg["trading_pair"],
-            "trade_type": float(TradeType.SELL.value) if msg["type"] == "sell" else float(TradeType.BUY.value),
-            "trade_id": msg["id"],
-            "update_id": ts,
-            "price": msg["price"],
-            "amount": msg["amount"]
+            "trade_type": float(TradeType.SELL.value) if msg["params"][1][0]["type"] == "sell" else float(TradeType.BUY.value),
+            "trade_id": msg["params"][1][0]["id"],
+            "update_id": ts * 1e-3,
+            "price": msg["params"][1][0]["price"],
+            "amount": msg["params"][1][0]["amount"]
         }, timestamp=ts * 1e-3)
