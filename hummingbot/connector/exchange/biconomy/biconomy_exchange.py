@@ -189,7 +189,7 @@ class BiconomyExchange(ExchangePyBase):
                            price: Decimal,
                            **kwargs) -> Tuple[str, float]:
         order_result = None
-        amount_str = f"{amount:f}"
+        amount_str = str(f"{amount:f}")
         # type_str = BiconomyExchange.biconomy_order_type(order_type)
         side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
@@ -371,7 +371,7 @@ class BiconomyExchange(ExchangePyBase):
 
                 self.logger().debug(
                     f"Polling for order fills of {len(tasks)} trading pairs.")
-                results = await safe_gather(*tasks, return_exceptions=True)
+                results = tasks
 
                 for trades, trading_pair in zip(results, trading_pairs):
 
@@ -441,30 +441,31 @@ class BiconomyExchange(ExchangePyBase):
         await self._order_list(trading_pair)
         if len(self._orders) > 0:
             for order in self._orders:
-                order_ids.append(order["id"])
+                if order["state"] == "completed":
+                    order_ids.append(order["id"])
             try:
                 trades_results = []
-                for order_id in order_ids:
-                    params = {
-                        "api_key": self.api_key,
-                        "limit": "100",
-                        "offset": "0",
-                        "orderId": order_id,
-                    }
-                    trades = await self._api_post(
-                        path_url=CONSTANTS.MY_TRADES_PATH_URL,
-                        data=params,
-                        is_auth_required=True,
-                        limit_id=CONSTANTS.MY_TRADES_PATH_URL)
-                    trades_results.append(trades)
+                if len(order_ids) > 0:
+                    for order_id in order_ids:
+                        params = {
+                            "limit": "100",
+                            "offset": "0",
+                            "orderId": order_id,
+                        }
+                        trades = await self._api_post(
+                            path_url=CONSTANTS.MY_TRADES_PATH_URL,
+                            data=params,
+                            is_auth_required=True,
+                            limit_id=CONSTANTS.MY_TRADES_PATH_URL)
+                        trades_results.append(trades)
 
-                gathered_results = await safe_gather(*trades_results, return_exceptions=True)
+                    gathered_results = await safe_gather(*trades_results, return_exceptions=True)
 
-                for result in gathered_results:
-                    if isinstance(result, Exception):
-                        self.logger(f"Error in gathering trades: {str(result)}")
-                    else:
-                        self._trades.extend(result["result"]["records"])
+                    for result in gathered_results:
+                        if isinstance(result, Exception):
+                            self.logger(f"Error in gathering trades: {str(result)}")
+                        else:
+                            self._trades.extend(result["result"]["records"])
             except IOError as e:
                 error_description = str(e)
                 self.logger(f"Failed to get trades: {error_description}")
