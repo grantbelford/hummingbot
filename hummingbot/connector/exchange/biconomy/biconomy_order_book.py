@@ -26,8 +26,8 @@ class BiconomyOrderBook(OrderBook):
         return OrderBookMessage(OrderBookMessageType.SNAPSHOT, {
             "trading_pair": msg["trading_pair"],
             "update_id": timestamp,
-            "bids": msg["bids"],
-            "asks": msg["asks"]
+            "bids": [[msg[0], msg[1]] for msg in msg.get("bids", [])],
+            "asks": [[msg[0], msg[1]] for msg in msg.get("asks", [])]
         }, timestamp=timestamp)
 
     @classmethod
