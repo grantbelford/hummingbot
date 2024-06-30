@@ -29,8 +29,8 @@ ORDER_STATUS = "/private/order/{}/detail"
 CANCEL_ORDER_PATH_URL = "/private/trade/cancel"
 BICONOMY_USER_STREAM_PATH_URL = "/userDataStream"
 
-USER_TRADES_ENDPOINT_NAME = "deals.update"
-USER_ORDERS_ENDPOINT_NAME = "order.subscribe"
+USER_ASSET_ENDPOINT_NAME = "asset.update"
+USER_ORDERS_ENDPOINT_NAME = "order.update"
 SERVER_SIGN = "server.sign"
 
 WS_HEARTBEAT_TIME_INTERVAL = 30
@@ -53,8 +53,10 @@ MAX_REQUEST = 5000
 
 # Order States
 ORDER_STATE = {
+    "created": OrderState.PENDING_CREATE,
     "finished": OrderState.FILLED,
     "pending": OrderState.PARTIALLY_FILLED,
+    "canceled": OrderState.CANCELED
 }
 
 # Websocket event types

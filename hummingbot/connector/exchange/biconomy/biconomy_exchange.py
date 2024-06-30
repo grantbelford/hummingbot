@@ -227,20 +227,28 @@ class BiconomyExchange(ExchangePyBase):
         o_id = await tracked_order.get_exchange_order_id()
         api_params = {
             "market": symbol,
-            "order_id": o_id,
+            "order_id": int(o_id),
         }
-        cancel_result = await self._api_post(
-            path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
-            data=api_params,
-            is_auth_required=True)
-        if cancel_result.get("message") == "Order not found":
-            self.logger().debug(f"The order {order_id} does not exist on Biconomy. "
-                                f"No cancelation needed.")
-            await self._order_tracker.process_order_not_found(order_id)
-            raise IOError(f'{cancel_result["message"]}')
-        if "result" in cancel_result and cancel_result.get("message") == "successful":
-            return True
-        return False
+        try:
+            new_res = []
+            cancel_result = await self._api_post(
+                path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
+                data=api_params,
+                is_auth_required=True)
+            if cancel_result.get("message") is not None:
+                new_res.append(cancel_result.get("message"))
+        except IOError as e:
+            error_description = str(e)
+            is_not_active = ("error" in error_description
+                             and "Order not found" in error_description)
+            if is_not_active:
+                self.logger().debug(f"The order {order_id} does not exist on biconomy."
+                                    f"No cancelation needed.")
+                await self._order_tracker.process_order_not_found(order_id)
+                new_res.append("Order is not active")
+            else:
+                raise
+        return True if ("successful" in new_res[0] or "Order not found" in new_res[0]) else False
 
     async def _format_trading_rules(self, exchange_info_dict: list[dict]) -> List[TradingRule]:
         """
@@ -293,50 +301,97 @@ class BiconomyExchange(ExchangePyBase):
         stream data source. It keeps reading events from the queue until the task is interrupted.
         The events received are balance updates, order updates and trade events.
         """
+        user_channels = [
+            CONSTANTS.USER_ASSET_ENDPOINT_NAME,
+            CONSTANTS.USER_ORDERS_ENDPOINT_NAME,
+        ]
         async for event_message in self._iter_user_event_queue():
             try:
-                event_type = event_message.get("method")
-                # Refer to https://github.com/biconomy-exchange/biconomy-official-api-docs/blob/master/user-data-stream.md
-                # As per the order update section in Biconomy the ID of the order being canceled is under the "C" key
-                if event_type == "deals.update":
-                    client_order_id = event_message["client"]
-                    tracked_order = self._order_tracker.all_fillable_orders.get(
-                        event_message["client"])
-                    if tracked_order is not None:
+                channel: str = event_message.get("method", None)
+                results: Dict[str, Any] = event_message.get("params", [])
+                if "result" not in event_message and channel not in user_channels:
+                    self.logger().error(
+                        f"Unexpected message in user stream: {event_message}.", exc_info=True)
+                    continue
+                if channel == "order.update":
+                    execution_type = event_message["params"][1]
+                    exchange_order_id = results[1]["id"]
+                    params = {
+                        "order_id": exchange_order_id,
+                        "limit": "100",
+                        "offset": "0",
+                    }
+                    trades = await self._api_post(
+                        path_url=CONSTANTS.MY_TRADES_PATH_URL,
+                        data=params,
+                        is_auth_required=True,
+                        limit_id=CONSTANTS.MY_TRADES_PATH_URL)
+
+                    tracked_order = self._order_tracker.all_fillable_orders_by_exchange_order_id.get(exchange_order_id)
+                    if tracked_order is None:
+                        all_orders = self._order_tracker.all_fillable_orders
+                        for k, v in all_orders.items():
+                            await v.get_exchange_order_id()
+                        _cli_tracked_orders = [o for o in all_orders.values() if exchange_order_id == o.exchange_order_id]
+                        if not _cli_tracked_orders:
+                            self.logger().debug(f"Ignoring trade message with id {exchange_order_id}: not in in_flight_orders.")
+                            return
+                        tracked_order = _cli_tracked_orders[0]
+                    for trade in trades:
+                        quote = trade["market"].split("_")[1]
                         fee = TradeFeeBase.new_spot_fee(
                             fee_schema=self.trade_fee_schema(),
                             trade_type=tracked_order.trade_type,
-                            percent_token=event_message["N"],
-                            flat_fees=[TokenAmount(amount=Decimal(
-                                event_message["fee"]), token=event_message["N"])]
+                            percent_token=quote,
+                            flat_fees=[TokenAmount(amount=Decimal(trade["deal_fee"]), token=quote)]
                         )
                         trade_update = TradeUpdate(
-                            trade_id=str(event_message["id"]),
-                            client_order_id=client_order_id,
-                            exchange_order_id=str(event_message["i"]),
+                            trade_id=str(trade["id"]),
+                            client_order_id=tracked_order.client_order_id,
+                            exchange_order_id=str(trade["id"]),
                             trading_pair=tracked_order.trading_pair,
                             fee=fee,
-                            fill_base_amount=Decimal(event_message["amount"]),
-                            fill_quote_amount=Decimal(
-                                event_message["amount"]) * Decimal(event_message["price"]),
-                            fill_price=Decimal(event_message["price"]),
-                            fill_timestamp=event_message["time"] * 1e-3,
+                            fill_base_amount=Decimal(trade["amount"]),
+                            fill_quote_amount=Decimal(trade["amount"]) * Decimal(trade["price"]),
+                            fill_price=Decimal(trade["price"]),
+                            fill_timestamp=trade["ctime"] * 1e-3,
                         )
-                        self._order_tracker.process_trade_update(
-                            trade_update)
-
-                tracked_order = self._order_tracker.all_updatable_orders.get(
-                    client_order_id)
-                if tracked_order is not None:
+                        self._order_tracker.process_trade_update(trade_update)
+                    tracked_order = self._order_tracker.all_fillable_orders_by_exchange_order_id.get(exchange_order_id)
+                    deal_stock = float(results[1]["deal_stock"])
+                    deal_money = float(results[1]["deal_money"])
+                    if execution_type == 0:
+                        state = "created"
+                    elif execution_type == 2 and deal_money > 0 and deal_stock > 0:
+                        state == "pending"
+                    elif execution_type == 3 and deal_stock > 0 and deal_money > 0:
+                        state == "finished"
+                    elif execution_type == 3 and deal_stock == 0 and deal_money == 0:
+                        state == "canceled"
+                    if not tracked_order:
+                        self.logger().debug(f"Ignoring order message with id {exchange_order_id}: not in in_flight_orders.")
+                        return
                     order_update = OrderUpdate(
                         trading_pair=tracked_order.trading_pair,
-                        update_timestamp=event_message["time"] * 1e-3,
-                        new_state=CONSTANTS.ORDER_STATE[event_message["X"]],
-                        client_order_id=client_order_id,
-                        exchange_order_id=str(event_message["i"]),
+                        update_timestamp=event_message["mtime"] * 1e-3,
+                        new_state=CONSTANTS.ORDER_STATE[state],
+                        client_order_id=tracked_order.client_order_id,
+                        exchange_order_id=str(event_message["id"]),
                     )
-                    self._order_tracker.process_order_update(
-                        order_update=order_update)
+                    self._order_tracker.process_order_update(order_update=order_update)
+
+                elif channel == "asset.update":
+                    tokens_data: list[Dict[str, Any]] = event_message.get('params', {})
+                    # Iterate over each token and its data
+                    for token_info in tokens_data:
+                        for token, info in token_info.items():
+                            if isinstance(info, dict):
+                                asset_name = token
+                                free_balance = Decimal(info.get("available", "0"))
+                                locked_balance = Decimal(info.get("freeze", "0"))
+                                total_balance = free_balance + locked_balance
+                                self._account_available_balances[asset_name] = free_balance
+                                self._account_balances[asset_name] = total_balance
 
             except asyncio.CancelledError:
                 raise
@@ -539,7 +594,12 @@ class BiconomyExchange(ExchangePyBase):
 
             if len(result) > 0:
                 for order in result:
-                    order['state'] = 'finished'
+                    deal_stock = float(order["deal_stock"])
+                    deal_money = float(order["deal_money"])
+                    if deal_stock > 0 and deal_money > 0:
+                        order['state'] = "finished"
+                    elif deal_stock == 0 and deal_money == 0:
+                        order['state'] = "canceled"
                 self._orders.extend(result)  # Use extend instead of append to add orders correctly
             return result
 
@@ -566,8 +626,13 @@ class BiconomyExchange(ExchangePyBase):
 
             if len(result) > 0:
                 for order in result:
-                    order['state'] = 'pending'
-                self._orders.extend(result)  # Use extend instead of append to add orders correctly
+                    deal_stock = float(order["deal_stock"])
+                    deal_money = float(order["deal_money"])
+                    if deal_stock > 0 and deal_money > 0:
+                        order['state'] = "pending"
+                    elif deal_stock == 0 and deal_money == 0:
+                        order['state'] = "created"
+                    self._orders.extend(result)  # Use extend instead of append to add orders correctly
 
             return result
 
