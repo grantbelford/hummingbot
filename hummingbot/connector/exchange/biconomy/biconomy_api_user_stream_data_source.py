@@ -102,7 +102,7 @@ class BiconomyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         await websocket_assistant.send(ping_request)
 
     async def _process_event_message(self, event_message: Dict[str, Any], queue: asyncio.Queue):
-        if "result" in "success" or "params" in event_message:
+        if "result" == "success" or "params" in event_message:
             queue.put_nowait(event_message)
         else:
             if event_message.get("error") is not None:

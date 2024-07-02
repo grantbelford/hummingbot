@@ -230,13 +230,11 @@ class BiconomyExchange(ExchangePyBase):
             "order_id": int(o_id),
         }
         try:
-            new_res = []
             cancel_result = await self._api_post(
                 path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
                 data=api_params,
                 is_auth_required=True)
-            if cancel_result.get("message") is not None:
-                new_res.append(cancel_result.get("message"))
+            return True if "successful" in cancel_result.get("message") else False
         except IOError as e:
             error_description = str(e)
             is_not_active = ("error" in error_description
@@ -245,10 +243,8 @@ class BiconomyExchange(ExchangePyBase):
                 self.logger().debug(f"The order {order_id} does not exist on biconomy."
                                     f"No cancelation needed.")
                 await self._order_tracker.process_order_not_found(order_id)
-                new_res.append("Order is not active")
             else:
                 raise
-        return True if ("successful" in new_res[0] or "Order not found" in new_res[0]) else False
 
     async def _format_trading_rules(self, exchange_info_dict: list[dict]) -> List[TradingRule]:
         """
