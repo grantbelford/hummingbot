@@ -336,7 +336,7 @@ class BiconomyExchange(ExchangePyBase):
         execution_type = order_status["params"][0]
         deal_stock = int(order_status["params"][1]["deal_stock"])
         deal_money = int(order_status["params"][1]["deal_money"])
-        if execution_type == 0 and deal_money == 0 and deal_stock == 0:
+        if execution_type == 1 and deal_money == 0 and deal_stock == 0:
             state = "created"
         elif execution_type == 2 and deal_money > 0 and deal_stock > 0:
             state = "pending"
