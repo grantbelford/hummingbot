@@ -7,7 +7,7 @@ HBOT_ORDER_ID_PREFIX = "x-XEKWYICX"
 MAX_ORDER_ID_LEN = 32
 
 # Base URL
-REST_URL = "https://market.biconomy.vip/api/"
+REST_URL = "https://api.biconomy.com/api/"
 WSS_URL = "wss://www.biconomy.com/ws"
 
 PUBLIC_API_VERSION = "v1"
@@ -37,8 +37,8 @@ WS_HEARTBEAT_TIME_INTERVAL = 30
 
 # Biconomy params
 
-SIDE_BUY = "1"
-SIDE_SELL = "2"
+SIDE_BUY = "2"
+SIDE_SELL = "1"
 
 TIME_IN_FORCE_GTC = "GTC"  # Good till cancelled
 TIME_IN_FORCE_IOC = "IOC"  # Immediate or cancel
@@ -56,7 +56,7 @@ ORDER_STATE = {
     "created": OrderState.PENDING_CREATE,
     "finished": OrderState.FILLED,
     "pending": OrderState.PARTIALLY_FILLED,
-    "canceled": OrderState.CANCELED
+    "cancelled": OrderState.CANCELED
 }
 
 # Websocket event types

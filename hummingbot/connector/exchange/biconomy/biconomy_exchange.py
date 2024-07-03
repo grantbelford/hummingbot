@@ -188,9 +188,7 @@ class BiconomyExchange(ExchangePyBase):
                            order_type: OrderType,
                            price: Decimal,
                            **kwargs) -> Tuple[str, float]:
-        order_result = None
         amount_str = str(f"{amount:f}")
-        # type_str = BiconomyExchange.biconomy_order_type(order_type)
         side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         api_params = {
@@ -234,7 +232,7 @@ class BiconomyExchange(ExchangePyBase):
                 path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
                 data=api_params,
                 is_auth_required=True)
-            return True if "successful" in cancel_result.get("message") else False
+            return True if "successful" or "Order not found" in cancel_result.get("message") else False
         except IOError as e:
             error_description = str(e)
             is_not_active = ("error" in error_description
@@ -293,9 +291,8 @@ class BiconomyExchange(ExchangePyBase):
 
     async def _user_stream_event_listener(self):
         """
-        This functions runs in background continuously processing the events received from the exchange by the user
-        stream data source. It keeps reading events from the queue until the task is interrupted.
-        The events received are balance updates, order updates and trade events.
+        Listens to messages from _user_stream_tracker.user_stream queue.
+        Traders, Orders, and Balance updates from the WS.
         """
         user_channels = [
             CONSTANTS.USER_ASSET_ENDPOINT_NAME,
@@ -309,91 +306,63 @@ class BiconomyExchange(ExchangePyBase):
                     self.logger().error(
                         f"Unexpected message in user stream: {event_message}.", exc_info=True)
                     continue
-                if channel == "order.update":
-                    execution_type = event_message["params"][1]
-                    exchange_order_id = results[1]["id"]
-                    params = {
-                        "order_id": exchange_order_id,
-                        "limit": "100",
-                        "offset": "0",
-                    }
-                    trades = await self._api_post(
-                        path_url=CONSTANTS.MY_TRADES_PATH_URL,
-                        data=params,
-                        is_auth_required=True,
-                        limit_id=CONSTANTS.MY_TRADES_PATH_URL)
-
-                    tracked_order = self._order_tracker.all_fillable_orders_by_exchange_order_id.get(exchange_order_id)
-                    if tracked_order is None:
-                        all_orders = self._order_tracker.all_fillable_orders
-                        for k, v in all_orders.items():
-                            await v.get_exchange_order_id()
-                        _cli_tracked_orders = [o for o in all_orders.values() if exchange_order_id == o.exchange_order_id]
-                        if not _cli_tracked_orders:
-                            self.logger().debug(f"Ignoring trade message with id {exchange_order_id}: not in in_flight_orders.")
-                            return
-                        tracked_order = _cli_tracked_orders[0]
-                    for trade in trades:
-                        quote = trade["market"].split("_")[1]
-                        fee = TradeFeeBase.new_spot_fee(
-                            fee_schema=self.trade_fee_schema(),
-                            trade_type=tracked_order.trade_type,
-                            percent_token=quote,
-                            flat_fees=[TokenAmount(amount=Decimal(trade["deal_fee"]), token=quote)]
-                        )
-                        trade_update = TradeUpdate(
-                            trade_id=str(trade["id"]),
-                            client_order_id=tracked_order.client_order_id,
-                            exchange_order_id=str(trade["id"]),
-                            trading_pair=tracked_order.trading_pair,
-                            fee=fee,
-                            fill_base_amount=Decimal(trade["amount"]),
-                            fill_quote_amount=Decimal(trade["amount"]) * Decimal(trade["price"]),
-                            fill_price=Decimal(trade["price"]),
-                            fill_timestamp=trade["ctime"] * 1e-3,
-                        )
-                        self._order_tracker.process_trade_update(trade_update)
-                    tracked_order = self._order_tracker.all_fillable_orders_by_exchange_order_id.get(exchange_order_id)
-                    deal_stock = float(results[1]["deal_stock"])
-                    deal_money = float(results[1]["deal_money"])
-                    if execution_type == 0:
-                        state = "created"
-                    elif execution_type == 2 and deal_money > 0 and deal_stock > 0:
-                        state == "pending"
-                    elif execution_type == 3 and deal_stock > 0 and deal_money > 0:
-                        state == "finished"
-                    elif execution_type == 3 and deal_stock == 0 and deal_money == 0:
-                        state == "canceled"
-                    if not tracked_order:
-                        self.logger().debug(f"Ignoring order message with id {exchange_order_id}: not in in_flight_orders.")
-                        return
-                    order_update = OrderUpdate(
-                        trading_pair=tracked_order.trading_pair,
-                        update_timestamp=event_message["mtime"] * 1e-3,
-                        new_state=CONSTANTS.ORDER_STATE[state],
-                        client_order_id=tracked_order.client_order_id,
-                        exchange_order_id=str(event_message["id"]),
-                    )
-                    self._order_tracker.process_order_update(order_update=order_update)
-
-                elif channel == "asset.update":
-                    tokens_data: list[Dict[str, Any]] = event_message.get('params', {})
-                    # Iterate over each token and its data
-                    for token_info in tokens_data:
-                        for token, info in token_info.items():
-                            if isinstance(info, dict):
-                                asset_name = token
-                                free_balance = Decimal(info.get("available", "0"))
-                                locked_balance = Decimal(info.get("freeze", "0"))
-                                total_balance = free_balance + locked_balance
-                                self._account_available_balances[asset_name] = free_balance
-                                self._account_balances[asset_name] = total_balance
+                if channel == CONSTANTS.USER_ORDERS_ENDPOINT_NAME:
+                    self._process_order_message(event_message)
+                elif channel == CONSTANTS.USER_ASSET_ENDPOINT_NAME:
+                    self._process_balance_message_ws(results)
 
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
+                self.logger().error(
+                    "Unexpected error in user stream listener loop.", exc_info=True)
                 await self._sleep(5.0)
+
+    def _process_balance_message_ws(self, event_message):
+        tokens_data: list[Dict[str, Any]] = event_message
+        # Iterate over each token and its data
+        for token_info in tokens_data:
+            for token, info in token_info.items():
+                if isinstance(info, dict):
+                    asset_name = token
+                    free_balance = Decimal(info.get("available", "0"))
+                    locked_balance = Decimal(info.get("freeze", "0"))
+                    total_balance = free_balance + locked_balance
+                    self._account_available_balances[asset_name] = free_balance
+                    self._account_balances[asset_name] = total_balance
+
+    def _create_order_update_with_order_status_data(self, order_status: Dict[str, Any], order: InFlightOrder):
+        state = ""
+        execution_type = order_status["params"][0]
+        deal_stock = int(order_status["params"][1]["deal_stock"])
+        deal_money = int(order_status["params"][1]["deal_money"])
+        if execution_type == 0 and deal_money == 0 and deal_stock == 0:
+            state = "created"
+        elif execution_type == 2 and deal_money > 0 and deal_stock > 0:
+            state = "pending"
+        elif execution_type == 3 and deal_stock > 0 and deal_money > 0:
+            state = "finished"
+        elif execution_type == 3 and deal_stock == 0 and deal_money == 0:
+            state = "cancelled"
+        order_update = OrderUpdate(
+            trading_pair=order.trading_pair,
+            update_timestamp=order_status["params"][1]["mtime"] * 1e-3,
+            new_state=CONSTANTS.ORDER_STATE[state],
+            client_order_id=order.client_order_id,
+            exchange_order_id=str(order_status["params"][1]["id"]),
+        )
+        return order_update
+
+    def _process_order_message(self, raw_msg: Dict[str, Any]):
+        order_msg = raw_msg.get("params", {})
+        client_order_id = str(order_msg[1].get("id", ""))
+        tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
+        if not tracked_order:
+            self.logger().debug(f"Ignoring order message with id {client_order_id}: not in in_flight_orders.")
+            return
+
+        order_update = self._create_order_update_with_order_status_data(order_status=raw_msg, order=tracked_order)
+        self._order_tracker.process_order_update(order_update=order_update)
 
     async def _update_order_fills_from_trades(self):
         """
@@ -468,7 +437,7 @@ class BiconomyExchange(ExchangePyBase):
                                 order_id=self._exchange_order_ids.get(
                                     str(trade["deal_order_id"]), None),
                                 trading_pair=trading_pair,
-                                trade_type=TradeType.BUY if trade["isBuyer"] else TradeType.SELL,
+                                # trade_type=TradeType.BUY if trade["isBuyer"] else TradeType.SELL,
                                 order_type=OrderType.LIMIT_MAKER if trade["role"] == 1 else OrderType.LIMIT,
                                 price=Decimal(trade["price"]),
                                 amount=Decimal(trade["amount"]),
@@ -574,11 +543,9 @@ class BiconomyExchange(ExchangePyBase):
         try:
             params = {
                 "api_key": self.api_key,
-                # "end_time": int(time.time() * 1000),
                 "limit": "100",
                 "market": trading_pair.replace("-", "_"),
                 "offset": 0,
-                # "start_time": query_time,
             }
             completed_orders = await self._api_post(
                 path_url=CONSTANTS.ORDER_PATH_URL.format("finished"),
@@ -595,7 +562,7 @@ class BiconomyExchange(ExchangePyBase):
                     if deal_stock > 0 and deal_money > 0:
                         order['state'] = "finished"
                     elif deal_stock == 0 and deal_money == 0:
-                        order['state'] = "canceled"
+                        order['state'] = "cancelled"
                 self._orders.extend(result)  # Use extend instead of append to add orders correctly
             return result
 
@@ -661,20 +628,34 @@ class BiconomyExchange(ExchangePyBase):
                 break
 
             state = order_data['state']
-            # Fetch updated order data
-            data = await self._api_post(
-                path_url=CONSTANTS.ORDER_STATUS.format(state),
-                data={"order_id": order_id},
-                is_auth_required=True,
-                limit_id=CONSTANTS.ORDER_STATUS
-            )
-            new_state = CONSTANTS.ORDER_STATE[state]
-            return OrderUpdate(
-                client_order_id=tracked_order.client_order_id,
-                exchange_order_id=str(data["result"]["id"]),
-                trading_pair=tracked_order.trading_pair,
-                update_timestamp=data["result"]["ftime"] * 1e-3,
-                new_state=new_state)
+            if state in ["pending", "completed", "created"]:
+                # Determine the state to fetch
+                fetch_state = "pending" if state == "created" else state
+                # Fetch updated order data
+                data = await self._api_post(
+                    path_url=CONSTANTS.ORDER_STATUS.format(fetch_state),
+                    data={
+                        "market": trading_pair,
+                        "order_id": order_id},
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.ORDER_STATUS
+                )
+                new_state = CONSTANTS.ORDER_STATE[state]
+                timestamp = data["result"]["mtime"]
+                return OrderUpdate(
+                    client_order_id=tracked_order.client_order_id,
+                    exchange_order_id=str(data["result"]["id"]),
+                    trading_pair=tracked_order.trading_pair,
+                    update_timestamp=timestamp * 1e-3,
+                    new_state=new_state)
+            else:
+                new_state = CONSTANTS.ORDER_STATE[state]
+                return OrderUpdate(
+                    client_order_id=tracked_order.client_order_id,
+                    exchange_order_id=tracked_order.exchange_order_id,
+                    trading_pair=tracked_order.trading_pair,
+                    update_timestamp=tracked_order.last_update_timestamp,
+                    new_state=new_state)
 
         if not found_order_data:
             raise ValueError(f"Order {order_id} not found in fetched orders.")
