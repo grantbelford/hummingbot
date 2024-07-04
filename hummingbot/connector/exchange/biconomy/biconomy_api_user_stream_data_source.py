@@ -13,7 +13,7 @@ from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
 
 if TYPE_CHECKING:
-    from hummingbot.connector.exchange.biconomy.biconomy_exchange import BiconomyExchange
+    from hummingbot.connector.exchange.ascend_ex.biconomy_exchange import BiconomyExchange
 
 
 class BiconomyAPIUserStreamDataSource(UserStreamTrackerDataSource):
