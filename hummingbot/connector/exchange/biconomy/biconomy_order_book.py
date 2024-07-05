@@ -2,8 +2,6 @@ from typing import Dict, Optional
 
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.core.data_type.order_book import OrderBook
-
-# from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
 
 

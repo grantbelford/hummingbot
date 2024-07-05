@@ -11,8 +11,6 @@ from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest, WSRequest
 
-# from urllib3 import encode_multipart_formdata
-
 
 class BiconomyAuth(AuthBase):
     def __init__(self, api_key: str, secret_key: str, time_provider: TimeSynchronizer):

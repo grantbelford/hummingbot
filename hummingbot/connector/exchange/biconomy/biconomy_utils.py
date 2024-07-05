@@ -51,37 +51,3 @@ class BiconomyConfigMap(BaseConnectorConfigMap):
 
 
 KEYS = BiconomyConfigMap.construct()
-
-# OTHER_DOMAINS = ["biconomy_us"]
-# OTHER_DOMAINS_PARAMETER = {"biconomy_us": "us"}
-# OTHER_DOMAINS_EXAMPLE_PAIR = {"biconomy_us": "BTC-USDT"}
-# OTHER_DOMAINS_DEFAULT_FEES = {"biconomy_us": DEFAULT_FEES}
-
-
-# class BiconomyUSConfigMap(BaseConnectorConfigMap):
-#     connector: str = Field(default="biconomy_us",
-#                            const=True, client_data=None)
-#     biconomy_api_key: SecretStr = Field(
-#         default=...,
-#         client_data=ClientFieldData(
-#             prompt=lambda cm: "Enter your Biconomy US API key",
-#             is_secure=True,
-#             is_connect_key=True,
-#             prompt_on_new=True,
-#         )
-#     )
-#     biconomy_api_secret: SecretStr = Field(
-#         default=...,
-#         client_data=ClientFieldData(
-#             prompt=lambda cm: "Enter your Biconomy US API secret",
-#             is_secure=True,
-#             is_connect_key=True,
-#             prompt_on_new=True,
-#         )
-#     )
-
-#     class Config:
-#         title = "biconomy_us"
-
-
-# OTHER_DOMAINS_KEYS = {"biconomy_us": BiconomyUSConfigMap.construct()}

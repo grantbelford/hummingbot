@@ -1,6 +1,5 @@
 import asyncio
 from decimal import Decimal
-# import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from bidict import bidict
@@ -23,7 +22,6 @@ from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTr
 from hummingbot.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.event.events import MarketEvent, OrderFilledEvent
-# from hummingbot.core.utils.async_utils import safe_gather
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
@@ -120,7 +118,6 @@ class BiconomyExchange(ExchangePyBase):
         return [OrderType.LIMIT, OrderType.MARKET]
 
     async def get_all_pairs_prices(self) -> List[Dict[str, str]]:
-
         results = {}
         pairs_prices = await self._api_get(path_url=CONSTANTS.TICKER_PRICE_CHANGE_PATH_URL)
         for pair_price_data in pairs_prices["tickers"]:
