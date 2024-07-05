@@ -401,7 +401,7 @@ class BiconomyExchange(ExchangePyBase):
             state = "cancelled"
         order_update = OrderUpdate(
             trading_pair=order.trading_pair,
-            update_timestamp=order_status["params"][1]["mtime"] * 1e-3,
+            update_timestamp=order_status["params"][1]["ftime"] * 1e-3 if state == "finished" else order_status["params"][1]["mtime"] * 1e-3,
             new_state=CONSTANTS.ORDER_STATE[state],
             client_order_id=order.client_order_id,
             exchange_order_id=str(order_status["params"][1]["id"]),
@@ -715,7 +715,7 @@ class BiconomyExchange(ExchangePyBase):
                     limit_id=CONSTANTS.ORDER_STATUS
                 )
                 new_state = CONSTANTS.ORDER_STATE[state]
-                timestamp = data["result"]["mtime"]
+                timestamp = data["result"]["ftime"] if state == "finished" else data["result"]["mtime"]
                 return OrderUpdate(
                     client_order_id=tracked_order.client_order_id,
                     exchange_order_id=str(data["result"]["id"]),
