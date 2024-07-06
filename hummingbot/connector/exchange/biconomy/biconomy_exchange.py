@@ -691,48 +691,42 @@ class BiconomyExchange(ExchangePyBase):
         trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=tracked_order.trading_pair)
         order_id = tracked_order.exchange_order_id
         found_order_data = None
-
         # Fetch and list the orders
         await self._order_list(trading_pair)
-
         # Search for the specific order in the list of orders
         for order_data in self._orders:
-            if order_data['id'] == order_id:
+            if str(order_data['id']) == order_id:
                 found_order_data = order_data
                 break
 
-            state = order_data['state']
-            if state in ["pending", "finished", "created"]:
-                # Determine the state to fetch
-                fetch_state = "pending" if state == "created" else state
-                # Fetch updated order data
-                data = await self._api_post(
-                    path_url=CONSTANTS.ORDER_STATUS.format(fetch_state),
-                    data={
-                        "market": trading_pair,
-                        "order_id": order_id},
-                    is_auth_required=True,
-                    limit_id=CONSTANTS.ORDER_STATUS
-                )
-                new_state = CONSTANTS.ORDER_STATE[state]
-                timestamp = data["result"]["ftime"] if state == "finished" else data["result"]["mtime"]
-                return OrderUpdate(
-                    client_order_id=tracked_order.client_order_id,
-                    exchange_order_id=str(data["result"]["id"]),
-                    trading_pair=tracked_order.trading_pair,
-                    update_timestamp=timestamp * 1e-3,
-                    new_state=new_state)
-            else:
-                new_state = CONSTANTS.ORDER_STATE[state]
-                return OrderUpdate(
-                    client_order_id=tracked_order.client_order_id,
-                    exchange_order_id=tracked_order.exchange_order_id,
-                    trading_pair=tracked_order.trading_pair,
-                    update_timestamp=tracked_order.last_update_timestamp,
-                    new_state=new_state)
-
         if not found_order_data:
             raise ValueError(f"Order {order_id} not found in fetched orders.")
+
+        state = found_order_data['state']
+        if state in ["pending", "finished", "created"]:
+            # Determine the state to fetch
+            fetch_state = "pending" if state == "created" else state
+
+            # Fetch updated order data
+            data = await self._api_post(
+                path_url=CONSTANTS.ORDER_STATUS.format(fetch_state),
+                data={
+                    "market": trading_pair,
+                    "order_id": order_id
+                },
+                is_auth_required=True,
+                limit_id=CONSTANTS.ORDER_STATUS
+            )
+
+            new_state = CONSTANTS.ORDER_STATE[state]
+            timestamp = data["result"]["ftime"] if state == "finished" else data["result"]["mtime"]
+            return OrderUpdate(
+                client_order_id=tracked_order.client_order_id,
+                exchange_order_id=str(data["result"]["id"]),
+                trading_pair=tracked_order.trading_pair,
+                update_timestamp=timestamp * 1e-3,
+                new_state=new_state
+            )
 
     async def _update_balances(self):
         # Retrieve local asset names

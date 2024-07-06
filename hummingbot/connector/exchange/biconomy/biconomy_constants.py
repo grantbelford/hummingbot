@@ -12,7 +12,7 @@ WSS_URL = "wss://www.biconomy.com/ws"
 
 PUBLIC_API_VERSION = "v1"
 PRIVATE_API_VERSION = "v2"
-PING_TIMEOUT = 3
+PING_TIMEOUT = 10
 # Public API endpoints or BiconomyClient function
 TICKER_PRICE_CHANGE_PATH_URL = "/tickers"
 TICKER_BOOK_PATH_URL = "/tickers"
