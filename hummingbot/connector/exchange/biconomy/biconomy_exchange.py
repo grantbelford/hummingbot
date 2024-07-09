@@ -524,10 +524,8 @@ class BiconomyExchange(ExchangePyBase):
                     is_auth_required=True,
                     limit_id=CONSTANTS.MY_TRADES_PATH_URL)
                 return trade
-            except IOError as e:
-                error_description = str(e)
-                self.logger(f"Failed to get trades: {error_description}")
-                raise
+            except Exception as exception:
+                raise IOError((f"Failed to get trades: {exception}"))
 
     async def _request_trades(self, trading_pair):
         order_ids = []
@@ -565,10 +563,10 @@ class BiconomyExchange(ExchangePyBase):
                             self.logger(f"Error in gathering trades: {str(result)}")
                         else:
                             self._trades.extend(result["result"]["records"])
-                except IOError as e:
-                    error_description = str(e)
-                    self.logger(f"Failed to get trades: {error_description}")
+                except asyncio.CancelledError:
                     raise
+                except Exception as exception:
+                    raise IOError((f"Failed to get trades: {exception}"))
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
@@ -612,8 +610,6 @@ class BiconomyExchange(ExchangePyBase):
         return trade_updates
 
     async def _request_completed_orders(self, trading_pair):
-        # query_time = int(self._last_trades_poll_biconomy_timestamp * 1e3)
-        # self._last_trades_poll_biconomy_timestamp = self._time_synchronizer.time()
         try:
             params = {
                 "api_key": self.api_key,
@@ -669,7 +665,7 @@ class BiconomyExchange(ExchangePyBase):
                         order['state'] = "pending"
                     elif deal_stock == 0 and deal_money == 0:
                         order['state'] = "created"
-                    self._orders.extend(result)  # Use extend instead of append to add orders correctly
+                    self._orders.extend(result)
 
             return result
 
