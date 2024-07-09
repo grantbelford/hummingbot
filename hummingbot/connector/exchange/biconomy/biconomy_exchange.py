@@ -65,9 +65,6 @@ class BiconomyExchange(ExchangePyBase):
             secret_key=self.secret_key,
             time_provider=self._time_synchronizer)
 
-    def domain_type(self):
-        return "www" if self._domain == "biconomy" else "vip"
-
     @property
     def name(self) -> str:
         return "biconomy"
@@ -353,7 +350,7 @@ class BiconomyExchange(ExchangePyBase):
         if tracked_order is None:
             self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
         else:
-            state = self.get_state(order_msg)
+            state = self.get_state(trade)
             if state is not None and state in ["finished", "pending"]:
                 trade_update = await self._create_trade_update_with_order_fill_data(
                     order_fill=trade,
