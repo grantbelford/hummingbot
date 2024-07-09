@@ -681,11 +681,13 @@ class BiconomyExchange(ExchangePyBase):
             raise ValueError(f"Order {order_id} not found in fetched orders.")
 
         state = found_order_data['state']
-        if state in ["pending", "finished"]:
+        if state in ["pending", "finished", "created"]:
+            # Determine the state to fetch
+            fetch_state = "pending" if state == "created" else state
 
             # Fetch updated order data
             data = await self._api_post(
-                path_url=CONSTANTS.ORDER_STATUS.format(state),
+                path_url=CONSTANTS.ORDER_STATUS.format(fetch_state),
                 data={
                     "market": trading_pair,
                     "order_id": order_id
@@ -702,6 +704,14 @@ class BiconomyExchange(ExchangePyBase):
                 trading_pair=tracked_order.trading_pair,
                 update_timestamp=timestamp * 1e-3,
                 new_state=new_state
+            )
+        else:
+            return OrderUpdate(
+                client_order_id=tracked_order.client_order_id,
+                exchange_order_id=str(tracked_order.exchange_order_id),
+                trading_pair=tracked_order.trading_pair,
+                update_timestamp=timestamp * 1e-3,
+                new_state=state
             )
 
     async def _update_balances(self):
