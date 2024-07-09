@@ -48,8 +48,6 @@ class BiconomyExchange(ExchangePyBase):
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
         self._last_trades_poll_biconomy_timestamp = 1.0
-        self._orders: List[Dict] = []
-        self._trades: List[Dict] = []
         super().__init__(client_config_map)
 
     @staticmethod
@@ -355,23 +353,29 @@ class BiconomyExchange(ExchangePyBase):
         if tracked_order is None:
             self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
         else:
-            state = ""
-            execution_type = trade["params"][0]
-            deal_stock = int(float(trade["params"][1]["deal_stock"]))
-            deal_money = int(float(trade["params"][1]["deal_money"]))
-            if execution_type == 1 and deal_money == 0 and deal_stock == 0:
-                state = "created"
-            elif execution_type == 2 and deal_money > 0 and deal_stock > 0:
-                state = "pending"
-            elif execution_type == 3 and deal_stock > 0 and deal_money > 0:
-                state = "finished"
-            elif execution_type == 3 and deal_stock == 0 and deal_money == 0:
-                state = "cancelled"
-            if state in ["finished", "pending"]:
+            state = self.get_state(order_msg)
+            if state is not None and state in ["finished", "pending"]:
                 trade_update = await self._create_trade_update_with_order_fill_data(
                     order_fill=trade,
                     order=tracked_order)
                 self._order_tracker.process_trade_update(trade_update)
+
+    def get_state(self, trade):
+        state = ""
+        execution_type = trade["params"][0]
+        deal_stock = Decimal(trade["params"][1]["deal_stock"])
+        deal_money = Decimal(trade["params"][1]["deal_money"])
+        if execution_type == 1 and deal_money == Decimal("0") and deal_stock == Decimal("0"):
+            state = "created"
+        elif execution_type == 2 and deal_money > Decimal("0") and deal_stock > Decimal("0"):
+            state = "pending"
+        elif execution_type == 3 and deal_stock > Decimal("0") and deal_money > Decimal("0"):
+            state = "finished"
+        elif execution_type == 3 and deal_stock == Decimal("0") and deal_money == Decimal("0"):
+            state = "cancelled"
+        else:
+            self.logger("ERROR in creating state")
+        return state
 
     def _process_balance_message_ws(self, event_message):
         tokens_data: list[Dict[str, Any]] = event_message
@@ -387,26 +391,16 @@ class BiconomyExchange(ExchangePyBase):
                     self._account_balances[asset_name] = total_balance
 
     def _create_order_update_with_order_status_data(self, order_status: Dict[str, Any], order: InFlightOrder):
-        state = ""
-        execution_type = order_status["params"][0]
-        deal_stock = int(float(order_status["params"][1]["deal_stock"]))
-        deal_money = int(float(order_status["params"][1]["deal_money"]))
-        if execution_type == 1 and deal_money == 0 and deal_stock == 0:
-            state = "created"
-        elif execution_type == 2 and deal_money > 0 and deal_stock > 0:
-            state = "pending"
-        elif execution_type == 3 and deal_stock > 0 and deal_money > 0:
-            state = "finished"
-        elif execution_type == 3 and deal_stock == 0 and deal_money == 0:
-            state = "cancelled"
-        order_update = OrderUpdate(
-            trading_pair=order.trading_pair,
-            update_timestamp=order_status["params"][1]["mtime"] * 1e-3,
-            new_state=CONSTANTS.ORDER_STATE[state],
-            client_order_id=order.client_order_id,
-            exchange_order_id=str(order_status["params"][1]["id"]),
-        )
-        return order_update
+        state = self.get_state(order_status)
+        if state is not None:
+            order_update = OrderUpdate(
+                trading_pair=order.trading_pair,
+                update_timestamp=order_status["params"][1]["mtime"] * 1e-3,
+                new_state=CONSTANTS.ORDER_STATE[state],
+                client_order_id=order.client_order_id,
+                exchange_order_id=str(order_status["params"][1]["id"]),
+            )
+            return order_update
 
     def _process_order_message(self, raw_msg: Dict[str, Any]):
         order_msg = raw_msg.get("params", {})
@@ -445,8 +439,8 @@ class BiconomyExchange(ExchangePyBase):
             tasks = []
             trading_pairs = self.trading_pairs
             for trading_pair in trading_pairs:
-                await self._request_trades(trading_pair)
-                tasks.extend(self._trades)
+                trades = await self._request_trades(trading_pair)
+                tasks.extend(trades)
 
             if len(tasks) > 0:
 
@@ -510,8 +504,8 @@ class BiconomyExchange(ExchangePyBase):
                             f"Recreating missing trade in TradeFill: {trade}")
 
     async def _request_trades_by_id(self, trading_pair, order_id):
-        await self._order_list(trading_pair)
-        if len(self._orders) > 0:
+        orders = await self._order_list(trading_pair)
+        if len(orders) > 0:
             try:
                 params = {
                     "order_id": order_id,
@@ -529,9 +523,9 @@ class BiconomyExchange(ExchangePyBase):
 
     async def _request_trades(self, trading_pair):
         order_ids = []
-        await self._order_list(trading_pair)
-        if len(self._orders) > 0:
-            for order in self._orders:
+        orders = await self._order_list(trading_pair)
+        if len(orders) > 0:
+            for order in orders:
                 if order["state"] in ["pending", "finished"]:
                     order_ids.append(order["id"])
             if len(order_ids) > 0:
@@ -562,7 +556,7 @@ class BiconomyExchange(ExchangePyBase):
                         if isinstance(result, Exception):
                             self.logger(f"Error in gathering trades: {str(result)}")
                         else:
-                            self._trades.extend(result["result"]["records"])
+                            return result["result"]["records"]
                 except asyncio.CancelledError:
                     raise
                 except Exception as exception:
@@ -627,19 +621,15 @@ class BiconomyExchange(ExchangePyBase):
 
             if len(result) > 0:
                 for order in result:
-                    deal_stock = int(float(order["deal_stock"]))
-                    deal_money = int(float(order["deal_money"]))
-                    if deal_stock > 0 and deal_money > 0:
+                    deal_stock = Decimal(order["deal_stock"])
+                    deal_money = Decimal(order["deal_money"])
+                    if deal_stock > Decimal("0") and deal_money > Decimal("0"):
                         order['state'] = "finished"
                     elif deal_stock == 0 and deal_money == 0:
                         order['state'] = "cancelled"
-                self._orders.extend(result)  # Use extend instead of append to add orders correctly
             return result
-
-        except IOError as e:
-            error_description = str(e)
-            self.logger(f"Failed to get Completed: {error_description}")
-            raise
+        except Exception as exception:
+            raise IOError((f"Failed to get Completed Oerders: {exception}"))
 
     async def _request_pending_orders(self, trading_pair):
         try:
@@ -659,20 +649,16 @@ class BiconomyExchange(ExchangePyBase):
 
             if len(result) > 0:
                 for order in result:
-                    deal_stock = int(float(order["deal_stock"]))
-                    deal_money = int(float(order["deal_money"]))
-                    if deal_stock > 0 and deal_money > 0:
+                    deal_stock = Decimal(order["deal_stock"])
+                    deal_money = Decimal(order["deal_money"])
+                    if deal_stock > Decimal("0") and deal_money > Decimal("0"):
                         order['state'] = "pending"
                     elif deal_stock == 0 and deal_money == 0:
                         order['state'] = "created"
-                    self._orders.extend(result)
-
             return result
 
-        except IOError as e:
-            error_description = str(e)
-            self.logger.error(f"Failed to get Pending Orders for {trading_pair}: {error_description}")
-            raise
+        except exception as exception:
+            raise IOError((f"Failed to get Pending Orders: {exception}"))
 
     async def _order_list(self, trading_pair):
         completed_orders_task = self._request_completed_orders(trading_pair)
@@ -680,17 +666,16 @@ class BiconomyExchange(ExchangePyBase):
 
         completed_orders, pending_orders = await asyncio.gather(completed_orders_task, pending_orders_task)
 
-        self._orders.extend(completed_orders)
-        self._orders.extend(pending_orders)
+        return completed_orders + pending_orders
 
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
         trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=tracked_order.trading_pair)
         order_id = tracked_order.exchange_order_id
         found_order_data = None
         # Fetch and list the orders
-        await self._order_list(trading_pair)
+        orders = await self._order_list(trading_pair)
         # Search for the specific order in the list of orders
-        for order_data in self._orders:
+        for order_data in orders:
             if str(order_data['id']) == order_id:
                 found_order_data = order_data
                 break
@@ -699,13 +684,11 @@ class BiconomyExchange(ExchangePyBase):
             raise ValueError(f"Order {order_id} not found in fetched orders.")
 
         state = found_order_data['state']
-        if state in ["pending", "finished", "created"]:
-            # Determine the state to fetch
-            fetch_state = "pending" if state == "created" else state
+        if state in ["pending", "finished"]:
 
             # Fetch updated order data
             data = await self._api_post(
-                path_url=CONSTANTS.ORDER_STATUS.format(fetch_state),
+                path_url=CONSTANTS.ORDER_STATUS.format(state),
                 data={
                     "market": trading_pair,
                     "order_id": order_id
