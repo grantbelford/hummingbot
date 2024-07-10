@@ -501,6 +501,7 @@ class BiconomyExchange(ExchangePyBase):
                             f"Recreating missing trade in TradeFill: {trade}")
 
     async def _request_trades_by_id(self, trading_pair, order_id):
+        trades = []
         orders = await self._order_list(trading_pair)
         if len(orders) > 0:
             try:
@@ -514,20 +515,22 @@ class BiconomyExchange(ExchangePyBase):
                     data=params,
                     is_auth_required=True,
                     limit_id=CONSTANTS.MY_TRADES_PATH_URL)
-                return trade
+                trades.extend(trade)
             except Exception as exception:
                 raise IOError((f"Failed to get trades: {exception}"))
+        return trades
 
     async def _request_trades(self, trading_pair):
         order_ids = []
         orders = await self._order_list(trading_pair)
+        results = []
+        trades_results = []
         if len(orders) > 0:
             for order in orders:
                 if order["state"] in ["pending", "finished"]:
                     order_ids.append(order["id"])
             if len(order_ids) > 0:
                 try:
-                    trades_results = []
                     for order_id in order_ids:
                         params = {
                             "order_id": order_id,
@@ -547,17 +550,17 @@ class BiconomyExchange(ExchangePyBase):
                             )
                             continue
 
-                    gathered_results = trades_results
-
-                    for result in gathered_results:
+                    for result in trades_results:
                         if isinstance(result, Exception):
                             self.logger(f"Error in gathering trades: {str(result)}")
                         else:
-                            return result["result"]["records"]
+                            results.extend(result["result"]["records"])
+                    return results
                 except asyncio.CancelledError:
                     raise
                 except Exception as exception:
                     raise IOError((f"Failed to get trades: {exception}"))
+            return results
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
