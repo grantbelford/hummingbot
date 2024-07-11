@@ -560,7 +560,7 @@ class BiconomyExchange(ExchangePyBase):
                     raise
                 except Exception as exception:
                     raise IOError((f"Failed to get trades: {exception}"))
-            return results
+        return results
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
