@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from decimal import Decimal
 from typing import Optional
@@ -75,11 +74,7 @@ class CustomAPIDataFeed(NetworkBase):
             resp_text = await resp.text()
             if resp.status != 200:
                 raise Exception(f"Custom API Feed {self.name} server error: {resp_text}")
-            data = json.loads(resp_text)
-            usd_value = data["ripple"]["usd"]
-            # Convert the float to a Decimal
-            usd_decimal = Decimal(usd_value)
-            self._price = Decimal(str(usd_decimal))
+            self._price = Decimal(str(resp_text))
         self._ready_event.set()
 
     async def start_network(self):
