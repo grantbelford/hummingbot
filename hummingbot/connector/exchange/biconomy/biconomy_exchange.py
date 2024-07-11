@@ -193,23 +193,16 @@ class BiconomyExchange(ExchangePyBase):
         api_params["side"] = side_str
 
         trade_types = "limit" if order_type is OrderType.LIMIT else "market"
-        try:
-            order_result = await self._api_post(
-                path_url=CONSTANTS.TRADE_PATH_URL.format(f"{trade_types}"),
-                data=api_params,
-                limit_id=CONSTANTS.TRADE_PATH_URL,
-                is_auth_required=True)
+        order_result = await self._api_post(
+            path_url=CONSTANTS.TRADE_PATH_URL.format(f"{trade_types}"),
+            data=api_params,
+            limit_id=CONSTANTS.TRADE_PATH_URL,
+            is_auth_required=True)
+        if "Successful operation" in order_result["message"]:
             o_id = str(order_result["result"]["id"])
             transact_time = order_result["result"]["ctime"] * 1e-3
-        except IOError as e:
-            error_description = str(e)
-            is_server_overloaded = ("status is 503" in error_description
-                                    and "Unknown error, please check your request or try again later." in error_description)
-            if is_server_overloaded:
-                o_id = "UNKNOWN"
-                transact_time = self._time_synchronizer.time()
-            else:
-                raise
+        else:
+            raise ValueError(f"{order_result['message']}")
         return o_id, transact_time
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
@@ -315,47 +308,47 @@ class BiconomyExchange(ExchangePyBase):
         tasks = []
         trading_pairs = self.trading_pairs
         order_id = int(order_fill["params"][1]["id"])
-        for trading_pair in trading_pairs:
-            trade = await self._request_trades_by_id(trading_pair, order_id)
-            tasks.append(trade)
 
-        if len(tasks) > 0:
-            result = tasks[0]["result"]["records"]
-            for trade, trading_pair in zip(result, trading_pairs):
-                quote = trading_pair.split("-")[1]
-                fee = TradeFeeBase.new_spot_fee(
-                    fee_schema=self.trade_fee_schema(),
-                    trade_type=order.trade_type,
-                    percent_token=quote,
-                    flat_fees=[TokenAmount(amount=Decimal(
-                        trade["fee"]), token=quote)]
-                )
-                trade_update = TradeUpdate(
-                    trade_id=str(trade["id"]),
-                    client_order_id=order.client_order_id,
-                    exchange_order_id=order_id,
-                    trading_pair=trading_pair,
-                    fee=fee,
-                    fill_base_amount=Decimal(trade["amount"]),
-                    fill_quote_amount=Decimal(trade["amount"]),
-                    fill_price=Decimal(trade["price"]),
-                    fill_timestamp=trade["time"] * 1e-3,
-                )
-            return trade_update
+        for trading_pair in trading_pairs:
+            tasks.append(self._request_trades_by_id(trading_pair, order_id))
+
+        # Gather all tasks
+        trade_responses = await asyncio.gather(*tasks)
+        if len(trade_responses) > 0:
+            result = trade_responses[0][0]
+            trade = result
+            quote = trading_pair.split("-")[1]
+            fee = TradeFeeBase.new_spot_fee(
+                fee_schema=self.trade_fee_schema(),
+                trade_type=order.trade_type,
+                percent_token=quote,
+                flat_fees=[TokenAmount(amount=Decimal(str(trade["fee"])), token=quote)]
+            )
+            trade_update = TradeUpdate(
+                trade_id=str(trade["id"]),
+                client_order_id=order.client_order_id,
+                exchange_order_id=order_id,
+                trading_pair=trading_pair,
+                fee=fee,
+                fill_base_amount=Decimal(trade["amount"]),
+                fill_quote_amount=Decimal(trade["amount"]),
+                fill_price=Decimal(trade["price"]),
+                fill_timestamp=trade["time"] * 1e-3,
+            )
+            self._order_tracker.process_trade_update(trade_update)
 
     async def _process_trade_message(self, trade: Dict[str, Any], client_order_id: Optional[str] = None):
+        state = self.get_state(trade)
         order_msg = trade.get("params", {})
         client_order_id = str(order_msg[1].get("id", ""))
         tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
         if tracked_order is None:
             self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
         else:
-            state = self.get_state(trade)
-            if state is not None and state in ["finished", "pending"]:
-                trade_update = await self._create_trade_update_with_order_fill_data(
+            if state is not None and state in ["pending", "finished"]:
+                await self._create_trade_update_with_order_fill_data(
                     order_fill=trade,
                     order=tracked_order)
-                self._order_tracker.process_trade_update(trade_update)
 
     def get_state(self, trade):
         state = ""
@@ -389,12 +382,14 @@ class BiconomyExchange(ExchangePyBase):
 
     def _create_order_update_with_order_status_data(self, order_status: Dict[str, Any], order: InFlightOrder):
         state = self.get_state(order_status)
+        client_order_id = str(order_status["params"][1].get("id", ""))
+        tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
         if state is not None:
             order_update = OrderUpdate(
                 trading_pair=order.trading_pair,
                 update_timestamp=order_status["params"][1]["mtime"] * 1e-3,
                 new_state=CONSTANTS.ORDER_STATE[state],
-                client_order_id=order.client_order_id,
+                client_order_id=tracked_order.client_order_id,
                 exchange_order_id=str(order_status["params"][1]["id"]),
             )
             return order_update
@@ -483,7 +478,7 @@ class BiconomyExchange(ExchangePyBase):
                                 order_id=self._exchange_order_ids.get(
                                     str(trade["deal_order_id"]), None),
                                 trading_pair=trading_pair,
-                                # trade_type=TradeType.BUY if trade["isBuyer"] else TradeType.SELL,
+                                trade_type=TradeType.BUY,  # Exchange didnt return trade type
                                 order_type=OrderType.LIMIT_MAKER if trade["role"] == 1 else OrderType.LIMIT,
                                 price=Decimal(trade["price"]),
                                 amount=Decimal(trade["amount"]),
@@ -500,24 +495,25 @@ class BiconomyExchange(ExchangePyBase):
                         self.logger().info(
                             f"Recreating missing trade in TradeFill: {trade}")
 
-    async def _request_trades_by_id(self, trading_pair, order_id):
+    async def _request_trades_by_id(self, trading_pair: str, order_id: int) -> List[Dict[str, Any]]:
         trades = []
         orders = await self._order_list(trading_pair)
-        if len(orders) > 0:
+        if orders:
             try:
                 params = {
                     "order_id": order_id,
                     "limit": "100",
                     "offset": "0",
                 }
-                trade = await self._api_post(
+                trade_response = await self._api_post(
                     path_url=CONSTANTS.MY_TRADES_PATH_URL,
                     data=params,
                     is_auth_required=True,
-                    limit_id=CONSTANTS.MY_TRADES_PATH_URL)
-                trades.extend(trade)
+                    limit_id=CONSTANTS.MY_TRADES_PATH_URL
+                )
+                trades.extend(trade_response.get("result", {}).get("records", []))  # Adjust based on actual response structure
             except Exception as exception:
-                raise IOError((f"Failed to get trades: {exception}"))
+                self.logger.error(f"Failed to get trades for {trading_pair} with order_id {order_id}: {exception}")
         return trades
 
     async def _request_trades(self, trading_pair):
