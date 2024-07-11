@@ -708,14 +708,6 @@ class BiconomyExchange(ExchangePyBase):
                 update_timestamp=timestamp * 1e-3,
                 new_state=new_state
             )
-        else:
-            return OrderUpdate(
-                client_order_id=tracked_order.client_order_id,
-                exchange_order_id=str(tracked_order.exchange_order_id),
-                trading_pair=tracked_order.trading_pair,
-                update_timestamp=timestamp * 1e-3,
-                new_state=state
-            )
 
     async def _update_balances(self):
         # Retrieve local asset names
