@@ -536,9 +536,9 @@ class BigoneExchange(ExchangePyBase):
                                 fill_timestamp=trade_data["inserted_at"] * 1e-3,
                             )
                             trade_updates.append(trade_update)
-                    if len(result) > 0:
-                        self._max_trade_id_by_symbol[symbol] = trade_data["page_token"]
-                    if len(result) < 1000:
+                    if len(result["data"]) > 0:
+                        self._max_trade_id_by_symbol[symbol] = result["page_token"]
+                    if len(result["data"]) < 1000:
                         break
 
         return trade_updates
