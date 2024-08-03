@@ -508,38 +508,38 @@ class BigoneExchange(ExchangePyBase):
                     params=params,
                     is_auth_required=True,
                 )
+                if len(result["data"]) > 0:
+                    for trade_data in result["data"]:
+                        order_type = trade_data["maker_order_id"]
+                        order_id = trade_data["maker_order_id"] if order_type else trade_data["taker_order_id"]
+                        if str(order_id) in orders_to_process:
+                            order = orders_to_process[str(order_id)]
+                            trade_fee = trade_data["maker_fee"]
+                            fees = trade_data["maker_fee"] if trade_fee else trade_data["taker_fee"]
 
-                for trade_data in result:
-                    order_type = trade_data["maker_order_id"]
-                    order_id = trade_data["maker_order_id"] if order_type else trade_data["taker_order_id"]
-                    if str(order_id) in orders_to_process:
-                        order = orders_to_process[str(order_id)]
-                        trade_fee = trade_data["maker_fee"]
-                        fees = trade_data["maker_fee"] if trade_fee else trade_data["taker_fee"]
-
-                        fee_token = trade_data["asset_pair_name"].split("-")[1]  # typo in the json by the exchange
-                        fee = TradeFeeBase.new_spot_fee(
-                            fee_schema=bigone_utils.DEFAULT_FEES,
-                            trade_type=order.trade_type,
-                            percent_token=fee_token,
-                            flat_fees=[TokenAmount(amount=Decimal(fees), token=fee_token)],
-                        )
-                        trade_update = TradeUpdate(
-                            trade_id=str(trade_data["id"]),
-                            client_order_id=order.client_order_id,
-                            exchange_order_id=str(order_id),
-                            trading_pair=order.trading_pair,
-                            fee=fee,
-                            fill_base_amount=Decimal(trade_data["amount"]),
-                            fill_quote_amount=Decimal(trade_data["amount"]) * Decimal(trade_data["price"]),
-                            fill_price=Decimal(trade_data["price"]),
-                            fill_timestamp=trade_data["inserted_at"] * 1e-3,
-                        )
-                        trade_updates.append(trade_update)
-                if len(result) > 0:
-                    self._max_trade_id_by_symbol[symbol] = trade_data["page_token"]
-                if len(result) < 1000:
-                    break
+                            fee_token = trade_data["asset_pair_name"].split("-")[1]  # typo in the json by the exchange
+                            fee = TradeFeeBase.new_spot_fee(
+                                fee_schema=bigone_utils.DEFAULT_FEES,
+                                trade_type=order.trade_type,
+                                percent_token=fee_token,
+                                flat_fees=[TokenAmount(amount=Decimal(fees), token=fee_token)],
+                            )
+                            trade_update = TradeUpdate(
+                                trade_id=str(trade_data["id"]),
+                                client_order_id=order.client_order_id,
+                                exchange_order_id=str(order_id),
+                                trading_pair=order.trading_pair,
+                                fee=fee,
+                                fill_base_amount=Decimal(trade_data["amount"]),
+                                fill_quote_amount=Decimal(trade_data["amount"]) * Decimal(trade_data["price"]),
+                                fill_price=Decimal(trade_data["price"]),
+                                fill_timestamp=trade_data["inserted_at"] * 1e-3,
+                            )
+                            trade_updates.append(trade_update)
+                    if len(result) > 0:
+                        self._max_trade_id_by_symbol[symbol] = trade_data["page_token"]
+                    if len(result) < 1000:
+                        break
 
         return trade_updates
 
