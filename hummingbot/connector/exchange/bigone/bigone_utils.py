@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict
 
@@ -18,6 +19,19 @@ DEFAULT_FEES = TradeFeeSchema(
 
 def trading_fees(self):
     pass
+
+
+def datetime_val_or_now(string_value: str,
+                        string_format: str = '%Y-%m-%dT%H:%M:%S.%fZ',
+                        on_error_return_now: bool = True,
+                        ) -> datetime:
+    try:
+        return datetime.strptime(string_value, string_format)
+    except Exception:
+        if on_error_return_now:
+            return datetime.now()
+        else:
+            return None
 
 
 def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:

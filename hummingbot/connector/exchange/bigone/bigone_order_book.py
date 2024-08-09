@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 
+from hummingbot.connector.exchange.bigone import bigone_utils as web_utils
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
@@ -22,7 +23,7 @@ class BigoneOrderBook(OrderBook):
         if metadata:
             msg.update(metadata)
         return OrderBookMessage(OrderBookMessageType.SNAPSHOT, {
-            "trading_pair": msg["data"]["asset_pair_name"],
+            "trading_pair": msg["trading_pair"],
             "update_id": timestamp,
             "bids": [[i['price'], i['quantity']] for i in msg["data"].get("bids", [])],
             "asks": [[i['price'], i['quantity']] for i in msg["data"].get("asks", [])],
@@ -43,11 +44,11 @@ class BigoneOrderBook(OrderBook):
         if metadata:
             msg.update(metadata)
         return OrderBookMessage(OrderBookMessageType.DIFF, {
-            "trading_pair": msg["depthUpdate"]["depth"]["trading_pair"],
-            "first_update_id": msg["depthUpdate"]["prevId"],
-            "update_id": msg["depthUpdate"]["changeId"],
-            "bids": [[i['price'], i['quantity']] for i in msg["depthUpdate"]["depth"].get("bids", [])],
-            "asks": [[i['price'], i['quantity']] for i in msg["depthUpdate"]["depth"].get("asks", [])],
+            "trading_pair": msg["trading_pair"],
+            "first_update_id": int(msg["depthUpdate"]["prevId"]),
+            "update_id": int(msg["depthUpdate"]["changeId"]),
+            "bids": [[i['price'], i['amount']] for i in msg["depthUpdate"]["depth"].get("bids", [])],
+            "asks": [[i['price'], i['amount']] for i in msg["depthUpdate"]["depth"].get("asks", [])],
         }, timestamp=timestamp)
 
     @classmethod
@@ -60,9 +61,9 @@ class BigoneOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        ts = msg["E"]
+        ts = web_utils.datetime_val_or_now(msg["tradeUpdate"]["trade"]["createdAt"], on_error_return_now=True).timestamp()
         return OrderBookMessage(OrderBookMessageType.TRADE, {
-            "trading_pair": msg["tradeUpdate"]["trade"]["trading_pair"],
+            "trading_pair": msg["trading_pair"],
             "trade_type": float(TradeType.SELL.value) if msg["tradeUpdate"]["trade"]["takerSide"] == "ASK" else float(TradeType.BUY.value),
             "trade_id": msg["tradeUpdate"]["trade"]["id"],
             "update_id": ts,

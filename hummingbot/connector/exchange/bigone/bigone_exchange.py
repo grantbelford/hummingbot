@@ -111,7 +111,7 @@ class BigoneExchange(ExchangePyBase):
         return self._trading_required
 
     def supported_order_types(self):
-        return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
+        return [OrderType.LIMIT, OrderType.MARKET]
 
     async def _get_all_pairs_prices(self) -> Dict[str, Any]:
         results = {}
@@ -194,6 +194,7 @@ class BigoneExchange(ExchangePyBase):
         if order_type is OrderType.LIMIT or order_type is OrderType.LIMIT_MAKER:
             price_str = f"{price:f}"
             api_params["price"] = price_str
+            api_params["post_only"] = True
 
         try:
             order_result = await self._api_post(
@@ -201,7 +202,7 @@ class BigoneExchange(ExchangePyBase):
                 data=api_params,
                 is_auth_required=True)
             o_id = str(order_result["id"])
-            transact_time = order_result["updated_at"] * 1e-3
+            transact_time = bigone_utils.datetime_val_or_now(order_result["updated_at"], on_error_return_now=True).timestamp()
         except IOError as e:
             error_description = str(e)
             is_server_overloaded = ("status is 503" in error_description
@@ -338,7 +339,7 @@ class BigoneExchange(ExchangePyBase):
             fill_base_amount=Decimal(order_fill['trade']["amount"]),
             fill_quote_amount=Decimal(order_fill['trade']["takerOrder"]["filledAmount"]),
             fill_price=Decimal(order_fill['trade']["takerOrder"]["price"]),
-            fill_timestamp=order_fill['trade']["takerOrder"]["createdAt"] * 1e-3,
+            fill_timestamp=bigone_utils.datetime_val_or_now(order_fill['trade']["takerOrder"]["createdAt"], on_error_return_now=True).timestamp(),
         )
         return trade_update
 
@@ -350,8 +351,8 @@ class BigoneExchange(ExchangePyBase):
                 self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
             else:
                 trade_update = self._create_trade_update_with_order_fill_data(
-                    order_fill=trade,
-                    order=tracked_order)
+                    order_fill = trade,
+                    order = tracked_order)
                 self._order_tracker.process_trade_update(trade_update)
 
     def _create_order_update_with_order_status_data(self, order_status: Dict[str, Any], order: InFlightOrder):
@@ -533,8 +534,7 @@ class BigoneExchange(ExchangePyBase):
                                 fill_base_amount=Decimal(trade_data["amount"]),
                                 fill_quote_amount=Decimal(trade_data["amount"]) * Decimal(trade_data["price"]),
                                 fill_price=Decimal(trade_data["price"]),
-                                fill_timestamp=trade_data["inserted_at"] * 1e-3,
-                            )
+                                fill_timestamp=bigone_utils.datetime_val_or_now(trade_data["inserted_at"], on_error_return_now=True).timestamp()),
                             trade_updates.append(trade_update)
                     if len(result["data"]) > 0:
                         self._max_trade_id_by_symbol[symbol] = result["page_token"]
@@ -556,7 +556,7 @@ class BigoneExchange(ExchangePyBase):
             client_order_id = tracked_order.client_order_id,
             exchange_order_id = str(updated_order_data["id"]),
             trading_pair = tracked_order.trading_pair,
-            update_timestamp = updated_order_data["updated_at"] * 1e-3,
+            update_timestamp = bigone_utils.datetime_val_or_now(updated_order_data["updated_at"], on_error_return_now=True).timestamp(),
             new_state = new_state,
         )
 

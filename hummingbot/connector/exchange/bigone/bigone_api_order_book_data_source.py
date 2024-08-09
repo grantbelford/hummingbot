@@ -75,13 +75,13 @@ class BigoneAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 params.append(f"{symbol.upper()}")
             payload = {
                 "requestId": "1",
-                "subscribeMarketTradesRequest": {"market": params, "limit": "20"}
+                "subscribeMarketTradesRequest": {"market": params[0], "limit": "20"}
             }
             subscribe_trade_request: WSJSONRequest = WSJSONRequest(payload=payload)
 
             payload = {
                 "requestId": "1",
-                "subscribeMarketDepthRequest": {"market": params}
+                "subscribeMarketDepthRequest": {"market": params[0]}
             }
             subscribe_orderbook_request: WSJSONRequest = WSJSONRequest(payload=payload)
 
@@ -115,17 +115,19 @@ class BigoneAPIOrderBookDataSource(OrderBookTrackerDataSource):
         return snapshot_msg
 
     async def _parse_trade_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        if "error" not in raw_message:
-            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["tradeUpdate"]["trade"]["market"])
+        message = json.loads(raw_message)
+        if "error" not in message:
+            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=message["tradeUpdate"]["trade"]["market"])
             trade_message = BigoneOrderBook.trade_message_from_exchange(
-                raw_message, {"trading_pair": trading_pair})
+                message, {"trading_pair": trading_pair})
             message_queue.put_nowait(trade_message)
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        if "error" not in raw_message:
-            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["depthUpdate"]["depth"]["market"])
+        message = json.loads(raw_message)
+        if "error" not in message:
+            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=message["depthUpdate"]["depth"]["market"])
             order_book_message: OrderBookMessage = BigoneOrderBook.diff_message_from_exchange(
-                raw_message, time.time(), {"trading_pair": trading_pair})
+                message, time.time(), {"trading_pair": trading_pair})
             message_queue.put_nowait(order_book_message)
 
     def _channel_originating_message(self, event_message: bytes) -> str:
@@ -136,5 +138,5 @@ class BigoneAPIOrderBookDataSource(OrderBookTrackerDataSource):
             if "depthUpdate" in message:
                 channel = self._diff_messages_queue_key
             elif "tradeUpdate" in message:
-                channel = self._diff_messages_queue_key
+                channel = self._trade_messages_queue_key
         return channel
