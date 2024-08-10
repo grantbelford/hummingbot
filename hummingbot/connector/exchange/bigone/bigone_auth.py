@@ -1,4 +1,3 @@
-import json
 import time
 from collections import OrderedDict
 from typing import Any, Dict
@@ -7,7 +6,7 @@ import jwt
 
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
-from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest, WSRequest
+from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WSRequest
 
 
 class BigoneAuth(AuthBase):
@@ -17,10 +16,6 @@ class BigoneAuth(AuthBase):
         self.time_provider = time_provider
 
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:
-        if request.method == RESTMethod.POST:
-            request.data = self.add_auth_to_params(params=json.loads(request.data))
-        else:
-            request.params = self.add_auth_to_params(params=request.params)
         headers = {}
         if request.headers is not None:
             headers.update(request.headers)

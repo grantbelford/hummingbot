@@ -201,8 +201,8 @@ class BigoneExchange(ExchangePyBase):
                 path_url=CONSTANTS.ORDER_PATH_URL,
                 data=api_params,
                 is_auth_required=True)
-            o_id = str(order_result["id"])
-            transact_time = bigone_utils.datetime_val_or_now(order_result["updated_at"], on_error_return_now=True).timestamp()
+            o_id = str(order_result["data"]["id"])
+            transact_time = bigone_utils.datetime_val_or_now(order_result["data"]["updated_at"], on_error_return_now=True).timestamp()
         except IOError as e:
             error_description = str(e)
             is_server_overloaded = ("status is 503" in error_description
@@ -218,13 +218,11 @@ class BigoneExchange(ExchangePyBase):
         api_params = {
             "client_order_id": order_id,
         }
-        cancel_result = await self._api_delete(
-            path_url=CONSTANTS.ORDER_PATH_URL,
-            params=api_params,
+        cancel_result = await self._api_post(
+            path_url=CONSTANTS.CANCEL_ORDER_BY_ID_OR_CLIENT,
+            data=api_params,
             is_auth_required=True)
-        if cancel_result.get("state") == "CANCELED":
-            return True
-        return False
+        return True if cancel_result["data"].get("state") == "CANCELLED" else False
 
     async def _format_trading_rules(self, exchange_info_dict: list[Dict[str, Any]]) -> List[TradingRule]:
         """
@@ -314,7 +312,7 @@ class BigoneExchange(ExchangePyBase):
     def _process_balance_message_ws(self, account):
         asset_name = account["account"]["asset"]
         self._account_available_balances[asset_name] = Decimal(str(account["account"]["balance"]))
-        self._account_balances[asset_name] = Decimal(str(account["account"]["balance"])) + Decimal(str(account["lockedBalance"]))
+        self._account_balances[asset_name] = Decimal(str(account["account"]["balance"])) + Decimal(str(account["account"]["lockedBalance"]))
 
     def _create_trade_update_with_order_fill_data(
             self,
@@ -345,8 +343,8 @@ class BigoneExchange(ExchangePyBase):
 
     def _process_trade_message(self, trade: Dict[str, Any], client_order_id: Optional[str] = None):
         if trade['trade']['takerOrder']["id"] != '':
-            client_order_id = client_order_id or str(trade['trade']['takerOrder']["id"])
-            tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
+            client_order_id = client_order_id or str(trade['trade']['takerOrder']["clientOrderId"])
+            tracked_order = self._order_tracker.all_fillable_orders.get(client_order_id)
             if tracked_order is None:
                 self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
             else:
@@ -358,17 +356,17 @@ class BigoneExchange(ExchangePyBase):
     def _create_order_update_with_order_status_data(self, order_status: Dict[str, Any], order: InFlightOrder):
         order_update = OrderUpdate(
             trading_pair=order.trading_pair,
-            update_timestamp=int(order_status['orders']["updatedAt"] * 1e-3),
-            new_state=CONSTANTS.ORDER_STATE[order_status['orders']["state"]],
+            update_timestamp=bigone_utils.datetime_val_or_now(order_status['order']["updatedAt"], on_error_return_now=True).timestamp(),
+            new_state=CONSTANTS.ORDER_STATE[order_status['order']["state"]],
             client_order_id=order.client_order_id,
-            exchange_order_id=str(order_status['orders']["id"]),
+            exchange_order_id=str(order_status['order']["id"]),
         )
         return order_update
 
     def _process_order_message(self, raw_msg: Dict[str, Any]):
-        order_msg = raw_msg.get("orders", {})
-        client_order_id = str(order_msg.get("id", ""))
-        tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
+        order_msg = raw_msg.get("order", {})
+        client_order_id = str(order_msg.get("clientOrderId", ""))
+        tracked_order = self._order_tracker.all_fillable_orders.get(client_order_id)
         if not tracked_order:
             self.logger().debug(f"Ignoring order message with id {client_order_id}: not in in_flight_orders.")
             return
@@ -498,7 +496,7 @@ class BigoneExchange(ExchangePyBase):
         # This endpoint is the only one on v2 for some reason
         symbols = {await self.exchange_symbol_associated_to_pair(trading_pair=o.trading_pair) for o in orders}
         trade_updates = []
-        orders_to_process = {order.client_order_id: order for order in orders}
+        orders_to_process = {order.exchange_order_id: order for order in orders}
         for symbol in symbols:
             for _ in range(2):
                 params = {"asset_pair_name": symbol, "limit": 200}
@@ -511,31 +509,35 @@ class BigoneExchange(ExchangePyBase):
                 )
                 if len(result["data"]) > 0:
                     for trade_data in result["data"]:
-                        order_type = trade_data["maker_order_id"]
-                        order_id = trade_data["maker_order_id"] if order_type else trade_data["taker_order_id"]
-                        if str(order_id) in orders_to_process:
-                            order = orders_to_process[str(order_id)]
-                            trade_fee = trade_data["maker_fee"]
-                            fees = trade_data["maker_fee"] if trade_fee else trade_data["taker_fee"]
+                        order_ids = []
+                        if trade_data["maker_order_id"] is not None:
+                            order_ids.append(trade_data["maker_order_id"])
+                        if trade_data["taker_order_id"] is not None:
+                            order_ids.append(trade_data["taker_order_id"])
+                        for order_id in order_ids:
+                            if str(order_id) in orders_to_process:
+                                order = orders_to_process[str(order_id)]
+                                trade_fee = trade_data["maker_fee"]
+                                fees = trade_data["maker_fee"] if trade_fee else trade_data["taker_fee"]
 
-                            fee_token = trade_data["asset_pair_name"].split("-")[1]  # typo in the json by the exchange
-                            fee = TradeFeeBase.new_spot_fee(
-                                fee_schema=bigone_utils.DEFAULT_FEES,
-                                trade_type=order.trade_type,
-                                percent_token=fee_token,
-                                flat_fees=[TokenAmount(amount=Decimal(fees), token=fee_token)],
-                            )
-                            trade_update = TradeUpdate(
-                                trade_id=str(trade_data["id"]),
-                                client_order_id=order.client_order_id,
-                                exchange_order_id=str(order_id),
-                                trading_pair=order.trading_pair,
-                                fee=fee,
-                                fill_base_amount=Decimal(trade_data["amount"]),
-                                fill_quote_amount=Decimal(trade_data["amount"]) * Decimal(trade_data["price"]),
-                                fill_price=Decimal(trade_data["price"]),
-                                fill_timestamp=bigone_utils.datetime_val_or_now(trade_data["inserted_at"], on_error_return_now=True).timestamp()),
-                            trade_updates.append(trade_update)
+                                fee_token = trade_data["asset_pair_name"].split("-")[1]  # typo in the json by the exchange
+                                fee = TradeFeeBase.new_spot_fee(
+                                    fee_schema=bigone_utils.DEFAULT_FEES,
+                                    trade_type=order.trade_type,
+                                    percent_token=fee_token,
+                                    flat_fees=[TokenAmount(amount=Decimal(fees), token=fee_token)],
+                                )
+                                trade_update = TradeUpdate(
+                                    trade_id=str(trade_data["id"]),
+                                    client_order_id=order.client_order_id,
+                                    exchange_order_id=str(order_id),
+                                    trading_pair=order.trading_pair,
+                                    fee=fee,
+                                    fill_base_amount=Decimal(trade_data["amount"]),
+                                    fill_quote_amount=Decimal(trade_data["amount"]) * Decimal(trade_data["price"]),
+                                    fill_price=Decimal(trade_data["price"]),
+                                    fill_timestamp=bigone_utils.datetime_val_or_now(trade_data["inserted_at"], on_error_return_now=True).timestamp()),
+                                trade_updates.append(trade_update)
                     if len(result["data"]) > 0:
                         self._max_trade_id_by_symbol[symbol] = result["page_token"]
                     if len(result["data"]) < 1000:
@@ -550,13 +552,13 @@ class BigoneExchange(ExchangePyBase):
                 "client_order_id": tracked_order.client_order_id},
             is_auth_required = True)
 
-        new_state = CONSTANTS.ORDER_STATE[updated_order_data["state"]]
+        new_state = CONSTANTS.ORDER_STATE[updated_order_data["data"]["state"]]
 
         order_update = OrderUpdate(
             client_order_id = tracked_order.client_order_id,
-            exchange_order_id = str(updated_order_data["id"]),
+            exchange_order_id = str(updated_order_data["data"]["id"]),
             trading_pair = tracked_order.trading_pair,
-            update_timestamp = bigone_utils.datetime_val_or_now(updated_order_data["updated_at"], on_error_return_now=True).timestamp(),
+            update_timestamp = bigone_utils.datetime_val_or_now(updated_order_data["data"]["updated_at"], on_error_return_now=True).timestamp(),
             new_state = new_state,
         )
 

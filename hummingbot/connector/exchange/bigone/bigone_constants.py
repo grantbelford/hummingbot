@@ -7,7 +7,7 @@ HBOT_ORDER_ID_PREFIX = "x-XEKWYICX"
 MAX_ORDER_ID_LEN = 32
 
 # Base URL
-REST_URL = "https://big.one/api/"
+REST_URL = "https://bigone.com/api/"
 WSS_URL = "wss://bigone.com/ws/v2"
 
 PUBLIC_API_VERSION = "v3"
@@ -60,7 +60,7 @@ MAX_REQUEST = 5000
 ORDER_STATE = {
     "PENDING": OrderState.OPEN,
     "FILLED": OrderState.FILLED,
-    "CANCELED": OrderState.CANCELED,
+    "CANCELLED": OrderState.CANCELED,
     "FIRED": OrderState.FAILED,
     "REJECTED": OrderState.FAILED,
 }
