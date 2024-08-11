@@ -180,7 +180,7 @@ class BiconomyExchange(ExchangePyBase):
                            order_type: OrderType,
                            price: Decimal,
                            **kwargs) -> Tuple[str, float]:
-        amount_str = str(f"{amount:f}")
+        amount_str = f"{amount:f}"
         side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         api_params = {
@@ -189,7 +189,7 @@ class BiconomyExchange(ExchangePyBase):
         }
         if order_type is OrderType.LIMIT or order_type is OrderType.LIMIT_MAKER:
             price_str = price
-            api_params["price"] = str(round(price_str, 5))
+            api_params["price"] = str(round(price_str, 4))
         api_params["side"] = side_str
 
         trade_types = "limit" if order_type is OrderType.LIMIT else "market"
@@ -212,17 +212,22 @@ class BiconomyExchange(ExchangePyBase):
             "market": symbol,
             "order_id": int(o_id),
         }
-        cancel_result = await self._api_post(
-            path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
-            data=api_params,
-            is_auth_required=True)
-        message = cancel_result.get("message")
-        if "Order not found" in message:
-            self.logger().debug(f"The order {order_id} does not exist on biconomy."
-                                f"No cancelation needed.")
-            await self._order_tracker.process_order_not_found(order_id)
-        else:
+        try:
+            cancel_result = await self._api_post(
+                path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
+                data=api_params,
+                is_auth_required=True)
+            message = cancel_result.get("message")
             return True if "Successful operation" in message else False
+        except IOError as e:
+            error_description = str(e)
+            if "Order not found" in error_description:
+                self.logger().debug(f"The order {order_id} does not exist on biconomy."
+                                    f"No cancelation needed.")
+                await self._order_tracker.process_order_not_found(order_id)
+            else:
+                self.logger().error(f"Error cancelling order {order_id}: {e}")
+                raise
 
     async def _format_trading_rules(self, exchange_info_dict: dict) -> List[TradingRule]:
         """
@@ -330,14 +335,12 @@ class BiconomyExchange(ExchangePyBase):
 
     def _create_order_update_with_order_status_data(self, order_status: Dict[str, Any], order: InFlightOrder):
         state = self.get_state(order_status)
-        client_order_id = str(order_status["params"][1].get("id", ""))
-        tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
         if state is not None:
             order_update = OrderUpdate(
                 trading_pair=order.trading_pair,
                 update_timestamp=order_status["params"][1]["mtime"] * 1e-3,
                 new_state=CONSTANTS.ORDER_STATE[state],
-                client_order_id=tracked_order.client_order_id,
+                client_order_id=order.client_order_id,
                 exchange_order_id=str(order_status["params"][1]["id"]),
             )
             return order_update
