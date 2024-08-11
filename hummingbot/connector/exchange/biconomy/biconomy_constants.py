@@ -3,7 +3,7 @@ from hummingbot.core.data_type.in_flight_order import OrderState
 
 DEFAULT_DOMAIN = "biconomy"
 
-HBOT_ORDER_ID_PREFIX = "x-XEKWYICX"
+HBOT_ORDER_ID_PREFIX = "x-BICONOMY-"
 MAX_ORDER_ID_LEN = 32
 
 # Base URL
@@ -16,7 +16,7 @@ PING_TIMEOUT = 10
 # Public API endpoints or BiconomyClient function
 TICKER_PRICE_CHANGE_PATH_URL = "/tickers"
 TICKER_BOOK_PATH_URL = "/tickers"
-EXCHANGE_INFO_PATH_URL = "/exchangeInfo"
+EXCHANGE_INFO_PATH_URL = "/symbol"
 PING_PATH_URL = "/ping"
 SNAPSHOT_PATH_URL = "/depth"
 

@@ -74,9 +74,8 @@ class BiconomyAPIOrderBookDataSource(OrderBookTrackerDataSource):
             depth_params = [10, "0.01"]
             for trading_pair in self._trading_pairs:
                 symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-                sym = symbol.upper()
-                depth_params.insert(0, sym)
-                trade_params.append(sym)
+                depth_params.insert(0, symbol)
+                trade_params.append(symbol)
             depth_payload = {
                 "method": "depth.subscribe",
                 "params": depth_params,

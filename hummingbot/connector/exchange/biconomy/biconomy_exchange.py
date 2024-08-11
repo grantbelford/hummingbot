@@ -224,7 +224,7 @@ class BiconomyExchange(ExchangePyBase):
         else:
             return True if "Successful operation" in message else False
 
-    async def _format_trading_rules(self, exchange_info_dict: list[dict]) -> List[TradingRule]:
+    async def _format_trading_rules(self, exchange_info_dict: dict) -> List[TradingRule]:
         """
         Example:
         [
@@ -239,20 +239,19 @@ class BiconomyExchange(ExchangePyBase):
             },
         ]
         """
-        trading_pair_rules = exchange_info_dict
+        trading_pair_rules = exchange_info_dict["result"]
         retval = []
         for rule in filter(biconomy_utils.is_exchange_information_valid, trading_pair_rules):
             try:
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=rule.get("symbol"))
-                step_size = Decimal(str(10 ** rule.get("baseAssetPrecision")))
-
+                min_amount_inc = Decimal(f"1e-{rule['base_asset_precision']}")
                 retval.append(
-                    TradingRule(trading_pair,
-                                min_order_size=Decimal(0.0001),
-                                #  price_size = Decimal(str(10 ** -len(price_info.get("markPx").split('.')[1])))
-                                min_price_increment=Decimal(0.0001),
-                                min_base_amount_increment=Decimal(step_size),
-                                min_notional_size=Decimal(0.0001)))
+                    TradingRule(
+                        trading_pair,
+                        min_order_size=Decimal(rule["min_quantity"]),
+                        min_price_increment=Decimal(rule["tick_size"]),
+                        min_base_amount_increment=min_amount_inc)
+                )
 
             except Exception:
                 self.logger().exception(
@@ -287,8 +286,7 @@ class BiconomyExchange(ExchangePyBase):
                         f"Unexpected message in user stream: {event_message}.", exc_info=True)
                     continue
                 if channel == CONSTANTS.USER_ORDERS_ENDPOINT_NAME:
-                    await self._process_trade_message(event_message)
-                    self._process_order_message(event_message)
+                    await self._process_order_message(event_message)
 
                 elif channel == CONSTANTS.USER_ASSET_ENDPOINT_NAME:
                     self._process_balance_message_ws(results)
@@ -299,56 +297,6 @@ class BiconomyExchange(ExchangePyBase):
                 self.logger().error(
                     "Unexpected error in user stream listener loop.", exc_info=True)
                 await self._sleep(5.0)
-
-    async def _create_trade_update_with_order_fill_data(
-            self,
-            order_fill: Dict[str, Any],
-            order: InFlightOrder):
-
-        tasks = []
-        trading_pairs = self.trading_pairs
-        order_id = int(order_fill["params"][1]["id"])
-
-        for trading_pair in trading_pairs:
-            tasks.append(self._request_trades_by_id(trading_pair, order_id))
-
-        # Gather all tasks
-        trade_responses = await asyncio.gather(*tasks)
-        if len(trade_responses) > 0:
-            result = trade_responses[0][0]
-            trade = result
-            quote = trading_pair.split("-")[1]
-            fee = TradeFeeBase.new_spot_fee(
-                fee_schema=self.trade_fee_schema(),
-                trade_type=order.trade_type,
-                percent_token=quote,
-                flat_fees=[TokenAmount(amount=Decimal(str(trade["fee"])), token=quote)]
-            )
-            trade_update = TradeUpdate(
-                trade_id=str(trade["id"]),
-                client_order_id=order.client_order_id,
-                exchange_order_id=order_id,
-                trading_pair=trading_pair,
-                fee=fee,
-                fill_base_amount=Decimal(trade["amount"]),
-                fill_quote_amount=Decimal(trade["amount"]),
-                fill_price=Decimal(trade["price"]),
-                fill_timestamp=trade["time"] * 1e-3,
-            )
-            self._order_tracker.process_trade_update(trade_update)
-
-    async def _process_trade_message(self, trade: Dict[str, Any], client_order_id: Optional[str] = None):
-        state = self.get_state(trade)
-        order_msg = trade.get("params", {})
-        client_order_id = str(order_msg[1].get("id", ""))
-        tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
-        if tracked_order is None:
-            self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
-        else:
-            if state is not None and state in ["pending", "finished"]:
-                await self._create_trade_update_with_order_fill_data(
-                    order_fill=trade,
-                    order=tracked_order)
 
     def get_state(self, trade):
         state = ""
@@ -394,13 +342,17 @@ class BiconomyExchange(ExchangePyBase):
             )
             return order_update
 
-    def _process_order_message(self, raw_msg: Dict[str, Any]):
+    async def _process_order_message(self, raw_msg: Dict[str, Any]):
         order_msg = raw_msg.get("params", {})
+        state = self.get_state(raw_msg)
         client_order_id = str(order_msg[1].get("id", ""))
         tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(client_order_id)
         if not tracked_order:
             self.logger().debug(f"Ignoring order message with id {client_order_id}: not in in_flight_orders.")
             return
+        if state is not None and state in ["pending", "finished"]:
+            # process trade fill
+            await self._all_trade_updates_for_order(order=tracked_order)
 
         order_update = self._create_order_update_with_order_status_data(order_status=raw_msg, order=tracked_order)
         self._order_tracker.process_order_update(order_update=order_update)
@@ -495,26 +447,26 @@ class BiconomyExchange(ExchangePyBase):
                         self.logger().info(
                             f"Recreating missing trade in TradeFill: {trade}")
 
-    async def _request_trades_by_id(self, trading_pair: str, order_id: int) -> List[Dict[str, Any]]:
-        trades = []
-        orders = await self._order_list(trading_pair)
-        if orders:
-            try:
-                params = {
-                    "order_id": order_id,
-                    "limit": "100",
-                    "offset": "0",
-                }
-                trade_response = await self._api_post(
-                    path_url=CONSTANTS.MY_TRADES_PATH_URL,
-                    data=params,
-                    is_auth_required=True,
-                    limit_id=CONSTANTS.MY_TRADES_PATH_URL
-                )
-                trades.extend(trade_response.get("result", {}).get("records", []))  # Adjust based on actual response structure
-            except Exception as exception:
-                self.logger.error(f"Failed to get trades for {trading_pair} with order_id {order_id}: {exception}")
-        return trades
+    # async def _request_trades_by_id(self, trading_pair: str, order_id: int) -> List[Dict[str, Any]]:
+    #     trades = []
+    #     orders = await self._order_list(trading_pair)
+    #     if orders:
+    #         try:
+    #             params = {
+    #                 "order_id": order_id,
+    #                 "limit": "100",
+    #                 "offset": "0",
+    #             }
+    #             trade_response = await self._api_post(
+    #                 path_url=CONSTANTS.MY_TRADES_PATH_URL,
+    #                 data=params,
+    #                 is_auth_required=True,
+    #                 limit_id=CONSTANTS.MY_TRADES_PATH_URL
+    #             )
+    #             trades.extend(trade_response.get("result", {}).get("records", []))  # Adjust based on actual response structure
+    #         except Exception as exception:
+    #             self.logger.error(f"Failed to get trades for {trading_pair} with order_id {order_id}: {exception}")
+    #     return trades
 
     async def _request_trades(self, trading_pair):
         order_ids = []
@@ -596,6 +548,7 @@ class BiconomyExchange(ExchangePyBase):
                     fill_price=Decimal(trade["price"]),
                     fill_timestamp=trade["time"] * 1e-3,
                 )
+                self._order_tracker.process_trade_update(trade_update)
                 trade_updates.append(trade_update)
         return trade_updates
 
@@ -613,17 +566,20 @@ class BiconomyExchange(ExchangePyBase):
                 is_auth_required=True,
                 limit_id=CONSTANTS.ORDER_PATH_URL
             )
-            result = completed_orders.get("result", {}).get("records", [])
+            if "result" in completed_orders:
+                result = completed_orders.get("result", {}).get("records", [])
 
-            if len(result) > 0:
-                for order in result:
-                    deal_stock = Decimal(order["deal_stock"])
-                    deal_money = Decimal(order["deal_money"])
-                    if deal_stock > Decimal("0") and deal_money > Decimal("0"):
-                        order['state'] = "finished"
-                    elif deal_stock == 0 and deal_money == 0:
-                        order['state'] = "cancelled"
-            return result
+                if len(result) > 0:
+                    for order in result:
+                        deal_stock = Decimal(order["deal_stock"])
+                        deal_money = Decimal(order["deal_money"])
+                        if deal_stock > Decimal("0") and deal_money > Decimal("0"):
+                            order['state'] = "finished"
+                        elif deal_stock == 0 and deal_money == 0:
+                            order['state'] = "cancelled"
+                return result
+            else:
+                return []
         except Exception as exception:
             raise IOError((f"Failed to get Completed Oerders: {exception}"))
 
@@ -640,19 +596,20 @@ class BiconomyExchange(ExchangePyBase):
                 is_auth_required=True,
                 limit_id=CONSTANTS.ORDER_PATH_URL
             )
+            if "result" in pending_orders:
+                result = pending_orders.get("result", {}).get("records", [])
 
-            result = pending_orders.get("result", {}).get("records", [])
-
-            if len(result) > 0:
-                for order in result:
-                    deal_stock = Decimal(order["deal_stock"])
-                    deal_money = Decimal(order["deal_money"])
-                    if deal_stock > Decimal("0") and deal_money > Decimal("0"):
-                        order['state'] = "pending"
-                    elif deal_stock == 0 and deal_money == 0:
-                        order['state'] = "created"
-            return result
-
+                if len(result) > 0:
+                    for order in result:
+                        deal_stock = Decimal(order["deal_stock"])
+                        deal_money = Decimal(order["deal_money"])
+                        if deal_stock > Decimal("0") and deal_money > Decimal("0"):
+                            order['state'] = "pending"
+                        elif deal_stock == 0 and deal_money == 0:
+                            order['state'] = "created"
+                return result
+            else:
+                return []
         except exception as exception:
             raise IOError((f"Failed to get Pending Orders: {exception}"))
 
@@ -735,10 +692,10 @@ class BiconomyExchange(ExchangePyBase):
             del self._account_available_balances[asset_name]
             del self._account_balances[asset_name]
 
-    def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: list[Dict]):
+    def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info):
         mapping = bidict()
 
-        for entry in filter(biconomy_utils.is_exchange_information_valid, exchange_info):
+        for entry in filter(biconomy_utils.is_exchange_information_valid, exchange_info["result"]):
             base, quote = entry['symbol'].split('_')
             # Replace hyphens with empty strings and reassign to base or quote
             if "-" in base:

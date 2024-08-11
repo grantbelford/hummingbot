@@ -22,7 +22,7 @@ def is_exchange_information_valid(exchange_info: list[Dict]) -> bool:
     :param exchange_info: the exchange information for a trading pair
     :return: True if the trading pair is enabled, False otherwise
     """
-    return exchange_info.get("status", None) == "trading"
+    return exchange_info is not None
 
 
 class BiconomyConfigMap(BaseConnectorConfigMap):
