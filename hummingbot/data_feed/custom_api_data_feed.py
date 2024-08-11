@@ -1,14 +1,12 @@
 import asyncio
-import logging
-from decimal import Decimal
-from typing import Optional
-
 import aiohttp
-
+import logging
+from typing import Optional
 from hummingbot.core.network_base import NetworkBase
 from hummingbot.core.network_iterator import NetworkStatus
-from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.logger import HummingbotLogger
+from hummingbot.core.utils.async_utils import safe_ensure_future
+from decimal import Decimal
 
 
 class CustomAPIDataFeed(NetworkBase):
