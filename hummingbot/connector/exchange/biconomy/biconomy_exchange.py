@@ -556,11 +556,12 @@ class BiconomyExchange(ExchangePyBase):
         return trade_updates
 
     async def _request_completed_orders(self, trading_pair):
+        symbol = trading_pair.replace("-", "_")
         try:
             params = {
                 "api_key": self.api_key,
                 "limit": "100",
-                "market": trading_pair.replace("-", "_"),
+                "market": symbol,
                 "offset": 0,
             }
             completed_orders = await self._api_post(
@@ -587,10 +588,11 @@ class BiconomyExchange(ExchangePyBase):
             raise IOError((f"Failed to get Completed Oerders: {exception}"))
 
     async def _request_pending_orders(self, trading_pair):
+        symbol = trading_pair.replace("-", "_")
         try:
             params = {
                 "limit": "100",
-                "market": trading_pair.replace("-", "_"),
+                "market": symbol,
                 "offset": 0
             }
             pending_orders = await self._api_post(
