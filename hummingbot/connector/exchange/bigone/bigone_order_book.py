@@ -15,7 +15,7 @@ class BigoneOrderBook(OrderBook):
                                        metadata: Optional[Dict] = None) -> OrderBookMessage:
         """
         Creates a snapshot message with the order book snapshot message
-        :param msg: the response from the exchange when requesting the order book snapshot
+        :param msg: the response from the exxchange when requesting the order book snapshot
         :param timestamp: the snapshot timestamp
         :param metadata: a dictionary with extra information to add to the snapshot data
         :return: a snapshot message with the snapshot information received from the exchange
@@ -24,7 +24,7 @@ class BigoneOrderBook(OrderBook):
             msg.update(metadata)
         return OrderBookMessage(OrderBookMessageType.SNAPSHOT, {
             "trading_pair": msg["trading_pair"],
-            "update_id": timestamp,
+            "update_id": int(timestamp),
             "bids": [[i['price'], i['quantity']] for i in msg["data"].get("bids", [])],
             "asks": [[i['price'], i['quantity']] for i in msg["data"].get("asks", [])],
         }, timestamp=timestamp)
@@ -65,8 +65,8 @@ class BigoneOrderBook(OrderBook):
         return OrderBookMessage(OrderBookMessageType.TRADE, {
             "trading_pair": msg["trading_pair"],
             "trade_type": float(TradeType.SELL.value) if msg["tradeUpdate"]["trade"]["takerSide"] == "ASK" else float(TradeType.BUY.value),
-            "trade_id": msg["tradeUpdate"]["trade"]["id"],
+            "trade_id": int(msg["tradeUpdate"]["trade"]["id"]),
             "update_id": ts,
             "price": msg["tradeUpdate"]["trade"]["price"],
             "amount": msg["tradeUpdate"]["trade"]["amount"]
-        }, timestamp=ts * 1e-3)
+        }, timestamp=int(ts))

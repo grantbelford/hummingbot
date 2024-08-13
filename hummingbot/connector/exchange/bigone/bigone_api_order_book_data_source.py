@@ -130,10 +130,18 @@ class BigoneAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 message, time.time(), {"trading_pair": trading_pair})
             message_queue.put_nowait(order_book_message)
 
-    def _channel_originating_message(self, event_message: bytes) -> str:
+    def _channel_originating_message(self, event_message) -> str:
         channel = ""
-        msg = event_message.decode('utf-8')
-        message = json.loads(msg)
+        # Check if event_message is bytes and needs to be decoded
+        if isinstance(event_message, bytes):
+            msg = event_message.decode('utf-8')
+            message = json.loads(msg)
+        elif isinstance(event_message, dict):
+            message = event_message
+        else:
+            raise TypeError("event_message must be either bytes or dict")
+
+        # Determine the channel based on the message content
         if "error" not in message:
             if "depthUpdate" in message:
                 channel = self._diff_messages_queue_key

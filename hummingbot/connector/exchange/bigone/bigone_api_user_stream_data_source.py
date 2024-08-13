@@ -84,21 +84,27 @@ class BigoneAPIUserStreamDataSource(UserStreamTrackerDataSource):
             subscribe_account_request: WSJSONRequest = WSJSONRequest(
                 payload=account_payload)
             await websocket_assistant.send(subscribe_auth_request)
-            await asyncio.sleep(3)
+            # await asyncio.sleep(3)
             await websocket_assistant.send(subscribe_order_change_request)
             await websocket_assistant.send(subscribe_trades_request)
             await websocket_assistant.send(subscribe_account_request)
 
-            self.logger().info("Subscribed to private order changes channels...")
+            self.logger().info("Subscribed to private order changes and balance updates channels...")
         except asyncio.CancelledError:
             raise
         except Exception:
             self.logger().exception("Unexpected error occurred subscribing to user streams...")
             raise
 
-    async def _process_event_message(self, event_message: bytes, queue: asyncio.Queue):
-        msg = event_message.decode('utf-8')
-        message = json.loads(msg)
+    async def _process_event_message(self, event_message, queue: asyncio.Queue):
+        # Check if event_message is bytes and needs to be decoded
+        if isinstance(event_message, bytes):
+            msg = event_message.decode('utf-8')
+            message = json.loads(msg)
+        elif isinstance(event_message, dict):
+            message = event_message
+        else:
+            raise TypeError("event_message must be either bytes or dict")
         if "error" in message:
             err_msg = message.get("error", {}).get("message", message.get("error"))
             raise IOError({

@@ -58,7 +58,8 @@ MAX_REQUEST = 5000
 
 # Order States
 ORDER_STATE = {
-    "PENDING": OrderState.OPEN,
+    "OPENING": OrderState.OPEN,
+    "PENDING": OrderState.PARTIALLY_FILLED,
     "FILLED": OrderState.FILLED,
     "CANCELLED": OrderState.CANCELED,
     "FIRED": OrderState.FAILED,

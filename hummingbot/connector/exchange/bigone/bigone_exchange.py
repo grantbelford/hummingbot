@@ -117,9 +117,9 @@ class BigoneExchange(ExchangePyBase):
         results = {}
         pairs_prices = await self._api_get(path_url=CONSTANTS.TICKER_PRICE_CHANGE_PATH_URL)
         for pair_price_data in pairs_prices:
-            results[pair_price_data["symbol"]] = {
-                "best_bid": pair_price_data["bid"],
-                "best_ask": pair_price_data["ask"],
+            results[pair_price_data["data"]["asset_pair_name"]] = {
+                "best_bid": pair_price_data["data"]["bid"],
+                "best_ask": pair_price_data["data"]["ask"],
             }
         return results
 
@@ -311,21 +311,21 @@ class BigoneExchange(ExchangePyBase):
 
     def _process_balance_message_ws(self, account):
         asset_name = account["account"]["asset"]
-        self._account_available_balances[asset_name] = Decimal(str(account["account"]["balance"]))
-        self._account_balances[asset_name] = Decimal(str(account["account"]["balance"])) + Decimal(str(account["account"]["lockedBalance"]))
+        self._account_available_balances[asset_name] = Decimal(account["account"]["balance"]) - Decimal(account["account"]["lockedBalance"])
+        self._account_balances[asset_name] = Decimal(str(account["account"]["balance"]))
 
     def _create_trade_update_with_order_fill_data(
             self,
             order_fill: Dict[str, Any],
             order: InFlightOrder):
-        token = order_fill['trade']["market"].split("-")[1],
+        token = order_fill['trade']["market"].split("-")[1]
         fee = TradeFeeBase.new_spot_fee(
             fee_schema=self.trade_fee_schema(),
             trade_type=order.trade_type,
             percent_token=token,
             flat_fees=[TokenAmount(
-                amount=Decimal(order_fill['trade']["amount"]),
-                token=order_fill[token]
+                amount=Decimal(order_fill['trade']["takerOrder"]["filledFees"]),
+                token=token
             )]
         )
         trade_update = TradeUpdate(
@@ -335,7 +335,7 @@ class BigoneExchange(ExchangePyBase):
             trading_pair=order.trading_pair,
             fee=fee,
             fill_base_amount=Decimal(order_fill['trade']["amount"]),
-            fill_quote_amount=Decimal(order_fill['trade']["takerOrder"]["filledAmount"]),
+            fill_quote_amount =Decimal(order_fill['trade']["takerOrder"]["filledAmount"]) * Decimal((order_fill['trade']["takerOrder"]["price"])),
             fill_price=Decimal(order_fill['trade']["takerOrder"]["price"]),
             fill_timestamp=bigone_utils.datetime_val_or_now(order_fill['trade']["takerOrder"]["createdAt"], on_error_return_now=True).timestamp(),
         )
@@ -536,7 +536,7 @@ class BigoneExchange(ExchangePyBase):
                                     fill_base_amount=Decimal(trade_data["amount"]),
                                     fill_quote_amount=Decimal(trade_data["amount"]) * Decimal(trade_data["price"]),
                                     fill_price=Decimal(trade_data["price"]),
-                                    fill_timestamp=bigone_utils.datetime_val_or_now(trade_data["inserted_at"], on_error_return_now=True).timestamp()),
+                                    fill_timestamp=bigone_utils.datetime_val_or_now(trade_data["inserted_at"], on_error_return_now=True).timestamp())
                                 trade_updates.append(trade_update)
                     if len(result["data"]) > 0:
                         self._max_trade_id_by_symbol[symbol] = result["page_token"]
@@ -575,8 +575,8 @@ class BigoneExchange(ExchangePyBase):
         balances = account_info
         for balance_entry in balances["data"]:
             asset_name = balance_entry["asset_symbol"]
-            free_balance = Decimal(balance_entry["balance"])
-            total_balance = Decimal(balance_entry["balance"]) + Decimal(balance_entry["locked_balance"])
+            free_balance = Decimal(balance_entry["balance"]) - Decimal(balance_entry["locked_balance"])
+            total_balance = Decimal(balance_entry["balance"])
             self._account_available_balances[asset_name] = free_balance
             self._account_balances[asset_name] = total_balance
             remote_asset_names.add(asset_name)
@@ -619,6 +619,7 @@ class BigoneExchange(ExchangePyBase):
         resp_json = await self._api_request(
             method = RESTMethod.GET,
             path_url = CONSTANTS.TICKER_BOOK_PATH_URL.format(symbol),
+            limit_id=CONSTANTS.TICKER_BOOK_PATH_URL
         )
 
         return float(resp_json["close"])
