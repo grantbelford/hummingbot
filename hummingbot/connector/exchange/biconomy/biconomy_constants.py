@@ -7,11 +7,11 @@ HBOT_ORDER_ID_PREFIX = "x-BICONOMY-"
 MAX_ORDER_ID_LEN = 32
 
 # Base URL
-REST_URL = "https://api.biconomy.com/api/"
+REST_URL = "https://www.biconomy.com/api/"
 WSS_URL = "wss://www.biconomy.com/ws"
 
 PUBLIC_API_VERSION = "v1"
-PRIVATE_API_VERSION = "v2"
+PRIVATE_API_VERSION = "v1"
 PING_TIMEOUT = 10
 # Public API endpoints or BiconomyClient function
 TICKER_PRICE_CHANGE_PATH_URL = "/tickers"
