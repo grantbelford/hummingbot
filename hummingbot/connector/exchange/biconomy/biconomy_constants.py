@@ -7,7 +7,7 @@ HBOT_ORDER_ID_PREFIX = "x-BICONOMY-"
 MAX_ORDER_ID_LEN = 32
 
 # Base URL
-REST_URL = "https://www.biconomy.com/api/"
+REST_URL = "https://api.biconomy.com/api/"
 WSS_URL = "wss://www.biconomy.com/ws"
 
 PUBLIC_API_VERSION = "v1"

@@ -1,7 +1,8 @@
 import hashlib
 import hmac
 import json
-from collections import OrderedDict
+
+# from collections import OrderedDict
 from typing import Any, Dict
 from urllib.parse import urlencode
 
@@ -66,7 +67,7 @@ class BiconomyAuth(AuthBase):
     def add_auth_to_params(self,
                            params: Dict[str, Any]):
 
-        request_params = OrderedDict(params or {})
+        request_params = params or {}
         request_params["api_key"] = self.api_key
         request_params["secret_key"] = self.secret_key
 
@@ -74,17 +75,17 @@ class BiconomyAuth(AuthBase):
 
         params_sign = {
             "api_key": self.api_key,
-            "sign": str.upper(self.get_hmac_sha256(params_string))
+            "sign": str.upper(self.get_md5_32(params_string))
         }
 
         return params_sign
 
     def add_auth_params(self, params: Dict[str, Any]):
-        request_params = OrderedDict(params or {})
+        request_params = params or {}
         request_params["api_key"] = self.api_key
 
         sign_string = self.build_parameters(request_params) + "&secret_key=" + self.secret_key
-        params_sign = str.upper(self.get_hmac_sha256(sign_string))
+        params_sign = str.upper(self.get_md5_32(sign_string))
         request_params["sign"] = params_sign
 
         # Convert all values to strings
